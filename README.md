@@ -2,9 +2,12 @@
 
 A Rust CLI tool that monitors large transactions on Polymarket and Kalshi prediction markets. Real-time alerts for significant market activity with built-in anomaly detection.
 
+**Repository**: https://github.com/neur0map/polymaster
+
 ## Features
 
 - **Real-time monitoring** of Polymarket and Kalshi transactions
+- **Audio alerts** - instant beep notification on every whale detection
 - **Customizable alerts** for transactions above a threshold (default: $25,000)
 - **Anomaly detection** - identifies unusual trading patterns including:
   - Extreme confidence bets (>95% or <5% probability)
