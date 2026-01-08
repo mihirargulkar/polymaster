@@ -4,7 +4,48 @@ Whale Watcher includes built-in anomaly detection to identify unusual trading pa
 
 ## Detection Categories
 
-### 1. Extreme Confidence Bets
+### 1. Wallet Activity Tracking (NEW - Highest Priority)
+
+**Triggers**:
+- **Repeat Actor**: Multiple large transactions from same wallet within 1 hour
+- **Heavy Actor**: 5+ large transactions from same wallet within 24 hours  
+- **Coordinated Activity**: >$200k volume from single wallet in 1 hour
+
+**Enhanced Alerts**:
+- **Standard Alert**: Single beep, green header
+- **Elevated Alert (Repeat Actor)**: Triple beep, "ELEVATED ALERT" header
+- **High Priority Alert (Heavy Actor)**: Triple beep, "HIGH PRIORITY ALERT" header in red
+
+Identifies wallets making repeated large transactions, which may indicate:
+- Institutional trading operations
+- Algorithmic trading strategies
+- Coordinated market manipulation
+- Information-driven trading campaigns
+- Major player establishing/unwinding positions
+
+**Example**:
+```
+[HIGH PRIORITY ALERT] REPEAT HEAVY ACTOR - Polymarket
+======================================================================
+Market:   Will candidate X win the election?
+Value:    $50,000.00
+
+[WALLET ACTIVITY]
+Wallet:   0x1a2b3c...def456
+Txns (1h):  3
+Txns (24h): 7
+Volume (1h):  $150,000.00
+Volume (24h): $325,000.00
+Status: HEAVY ACTOR (5+ transactions in 24h)
+
+[ANOMALY INDICATORS]
+  - HEAVY ACTOR: 7 transactions worth $325000.00 in last 24h
+  - Coordinated activity: $150000 volume in past hour
+```
+
+**Note**: Polymarket provides wallet addresses in trade data. Kalshi's public API does not expose account identifiers for privacy reasons.
+
+### 2. Extreme Confidence Bets
 
 **Trigger**: Price > 95% or < 5%
 

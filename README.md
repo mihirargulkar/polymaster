@@ -7,7 +7,11 @@ A Rust CLI tool that monitors large transactions on Polymarket and Kalshi predic
 ## Features
 
 - **Real-time monitoring** of Polymarket and Kalshi transactions
-- **Audio alerts** - instant beep notification on every whale detection
+- **Audio alerts** - instant beep notification (triple beep for repeat actors)
+- **Wallet tracking** - detects repeated large transactions from same wallet
+  - Elevated alerts for repeat actors (2+ txns in 1 hour)
+  - High priority alerts for heavy actors (5+ txns in 24 hours)
+  - Tracks volume and transaction frequency per wallet
 - **Customizable alerts** for transactions above a threshold (default: $25,000)
 - **Anomaly detection** - identifies unusual trading patterns including:
   - Extreme confidence bets (>95% or <5% probability)

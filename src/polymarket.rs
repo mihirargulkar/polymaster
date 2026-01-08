@@ -29,6 +29,8 @@ pub struct Trade {
     pub market_title: Option<String>,
     #[serde(skip)]
     pub outcome: Option<String>,
+    #[serde(skip)]
+    pub wallet_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -55,6 +57,12 @@ struct ActivityItem {
     timestamp: Option<i64>,
     #[serde(rename = "type")]
     activity_type: Option<String>,
+    #[serde(rename = "user")]
+    user: Option<String>,
+    #[serde(rename = "maker")]
+    maker: Option<String>,
+    #[serde(rename = "proxyWallet")]
+    proxy_wallet: Option<String>,
 }
 
 pub async fn fetch_recent_trades() -> Result<Vec<Trade>, PolymarketError> {
@@ -91,7 +99,7 @@ pub async fn fetch_recent_trades() -> Result<Vec<Trade>, PolymarketError> {
                 }
                 
                 Some(Trade {
-                    id: item.id,
+                    id: item.id.clone(),
                     market: item.market.unwrap_or_default(),
                     asset_id: item.asset.unwrap_or_default(),
                     side: item.side.unwrap_or_default(),
@@ -105,6 +113,7 @@ pub async fn fetch_recent_trades() -> Result<Vec<Trade>, PolymarketError> {
                         .unwrap_or_else(|| "Unknown".to_string()),
                     market_title: None,
                     outcome: None,
+                    wallet_id: item.user.or(item.maker).or(item.proxy_wallet),
                 })
             })
             .collect();
@@ -122,7 +131,7 @@ pub async fn fetch_recent_trades() -> Result<Vec<Trade>, PolymarketError> {
                 }
                 
                 Some(Trade {
-                    id: item.id,
+                    id: item.id.clone(),
                     market: item.market.unwrap_or_default(),
                     asset_id: item.asset.unwrap_or_default(),
                     side: item.side.unwrap_or_default(),
@@ -136,6 +145,7 @@ pub async fn fetch_recent_trades() -> Result<Vec<Trade>, PolymarketError> {
                         .unwrap_or_else(|| "Unknown".to_string()),
                     market_title: None,
                     outcome: None,
+                    wallet_id: item.user.or(item.maker).or(item.proxy_wallet),
                 })
             })
             .collect();

@@ -147,6 +147,7 @@ async fn watch_whales(threshold: u64, interval: u64) -> Result<(), Box<dyn std::
     );
     println!("Polling interval: {} seconds", interval);
     println!("Anomaly detection: ENABLED");
+    println!("Wallet tracking: ENABLED");
     println!();
 
     // Load config (optional credentials)
@@ -154,6 +155,9 @@ async fn watch_whales(threshold: u64, interval: u64) -> Result<(), Box<dyn std::
 
     let mut last_polymarket_trade_id: Option<String> = None;
     let mut last_kalshi_trade_id: Option<String> = None;
+    
+    // Initialize wallet tracker
+    let mut wallet_tracker = types::WalletTracker::new();
 
     let mut tick_interval = time::interval(Duration::from_secs(interval));
 
@@ -182,7 +186,16 @@ async fn watch_whales(threshold: u64, interval: u64) -> Result<(), Box<dyn std::
                                 trade.market_title = Some(title);
                                 trade.outcome = Some(outcome);
                             }
-                            print_whale_alert("Polymarket", trade, trade_value);
+                            
+                            // Track wallet activity
+                            let wallet_activity = if let Some(ref wallet_id) = trade.wallet_id {
+                                wallet_tracker.record_transaction(wallet_id, trade_value);
+                                Some(wallet_tracker.get_activity(wallet_id))
+                            } else {
+                                None
+                            };
+                            
+                            print_whale_alert("Polymarket", trade, trade_value, wallet_activity.as_ref());
                         }
                     }
                     
@@ -216,7 +229,8 @@ async fn watch_whales(threshold: u64, interval: u64) -> Result<(), Box<dyn std::
                             if let Some(title) = kalshi::fetch_market_info(&trade.ticker).await {
                                 trade.market_title = Some(title);
                             }
-                            print_kalshi_alert(trade, trade_value);
+                            // Note: Kalshi doesn't expose wallet IDs in public API
+                            print_kalshi_alert(trade, trade_value, None);
                         }
                     }
                     
@@ -230,16 +244,41 @@ async fn watch_whales(threshold: u64, interval: u64) -> Result<(), Box<dyn std::
     }
 }
 
-fn print_whale_alert(platform: &str, trade: &polymarket::Trade, value: f64) {
-    // Play alert sound immediately
-    play_alert_sound();
+fn print_whale_alert(platform: &str, trade: &polymarket::Trade, value: f64, wallet_activity: Option<&types::WalletActivity>) {
+    // Enhanced alert sound for repeat actors
+    if let Some(activity) = wallet_activity {
+        if activity.is_repeat_actor || activity.is_heavy_actor {
+            // Triple beep for repeat/heavy actors
+            play_alert_sound();
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            play_alert_sound();
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            play_alert_sound();
+        } else {
+            play_alert_sound();
+        }
+    } else {
+        play_alert_sound();
+    }
     
     println!();
+    
+    // Enhanced header for repeat actors
+    let header = if let Some(activity) = wallet_activity {
+        if activity.is_heavy_actor {
+            format!("[HIGH PRIORITY ALERT] REPEAT HEAVY ACTOR - {}", platform)
+        } else if activity.is_repeat_actor {
+            format!("[ELEVATED ALERT] REPEAT ACTOR - {}", platform)
+        } else {
+            format!("[ALERT] LARGE TRANSACTION DETECTED - {}", platform)
+        }
+    } else {
+        format!("[ALERT] LARGE TRANSACTION DETECTED - {}", platform)
+    };
+    
     println!(
         "{}",
-        format!("[ALERT] LARGE TRANSACTION DETECTED - {}", platform)
-            .bright_green()
-            .bold()
+        header.bright_red().bold()
     );
     println!("{}", "=".repeat(70).dimmed());
     
@@ -262,15 +301,36 @@ fn print_whale_alert(platform: &str, trade: &polymarket::Trade, value: f64) {
     println!("Side:     {}", trade.side.to_uppercase().bright_magenta());
     println!("Time:     {}", trade.timestamp);
     
+    // Display wallet activity if available
+    if let Some(activity) = wallet_activity {
+        if let Some(ref wallet_id) = trade.wallet_id {
+            println!();
+            println!("{}", "[WALLET ACTIVITY]".bright_cyan().bold());
+            println!("Wallet:   {}...{}", 
+                &wallet_id[..8.min(wallet_id.len())],
+                if wallet_id.len() > 8 { &wallet_id[wallet_id.len()-6..] } else { "" });
+            println!("Txns (1h):  {}", activity.transactions_last_hour);
+            println!("Txns (24h): {}", activity.transactions_last_day);
+            println!("Volume (1h):  ${:.2}", activity.total_value_hour);
+            println!("Volume (24h): ${:.2}", activity.total_value_day);
+            
+            if activity.is_heavy_actor {
+                println!("{}", "Status: HEAVY ACTOR (5+ transactions in 24h)".bright_red().bold());
+            } else if activity.is_repeat_actor {
+                println!("{}", "Status: REPEAT ACTOR (multiple transactions detected)".yellow().bold());
+            }
+        }
+    }
+    
     // Anomaly detection
-    detect_anomalies(trade.price, trade.size, value);
+    detect_anomalies(trade.price, trade.size, value, wallet_activity);
     
     println!("Asset ID: {}", trade.asset_id.dimmed());
     println!("{}", "=".repeat(70).dimmed());
     println!();
 }
 
-fn print_kalshi_alert(trade: &kalshi::Trade, value: f64) {
+fn print_kalshi_alert(trade: &kalshi::Trade, value: f64, _wallet_activity: Option<&types::WalletActivity>) {
     // Play alert sound immediately
     play_alert_sound();
     
@@ -299,7 +359,7 @@ fn print_kalshi_alert(trade: &kalshi::Trade, value: f64) {
     
     // Anomaly detection
     let avg_price = (trade.yes_price + trade.no_price) / 2.0;
-    detect_anomalies(avg_price / 100.0, trade.count as f64, value);
+    detect_anomalies(avg_price / 100.0, trade.count as f64, value, None);
     
     println!("{}", "=".repeat(70).dimmed());
     println!();
@@ -311,8 +371,24 @@ fn play_alert_sound() {
     io::stdout().flush().ok();
 }
 
-fn detect_anomalies(price: f64, size: f64, value: f64) {
+fn detect_anomalies(price: f64, size: f64, value: f64, wallet_activity: Option<&types::WalletActivity>) {
     let mut anomalies = Vec::new();
+    
+    // Wallet-based anomalies (highest priority)
+    if let Some(activity) = wallet_activity {
+        if activity.is_heavy_actor {
+            anomalies.push(format!("HEAVY ACTOR: {} transactions worth ${:.2} in last 24h", 
+                activity.transactions_last_day, activity.total_value_day));
+        }
+        if activity.is_repeat_actor && !activity.is_heavy_actor {
+            anomalies.push(format!("Repeat actor: {} transactions in last hour", 
+                activity.transactions_last_hour));
+        }
+        if activity.total_value_hour > 200000.0 {
+            anomalies.push(format!("Coordinated activity: ${:.0} volume in past hour", 
+                activity.total_value_hour));
+        }
+    }
     
     // Extreme confidence (very high or very low probability)
     if price > 0.95 {

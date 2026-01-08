@@ -32,6 +32,8 @@ pub struct Trade {
     pub created_time: String,
     #[serde(skip)]
     pub market_title: Option<String>,
+    // Note: Kalshi public API doesn't expose account IDs for privacy
+    // Use trade_id as proxy for tracking patterns
 }
 
 #[derive(Debug, Deserialize)]
