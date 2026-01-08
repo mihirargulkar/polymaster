@@ -119,7 +119,39 @@ pub fn parse_ticker_details(ticker: &str) -> String {
     // Parse Kalshi ticker to extract bet details
     // Format examples:
     // KXNHLGAME-26JAN08ANACAR-CAR = NHL game, Carolina wins
+    // KXNCAAFTOTAL-26JAN08MIAMISS-51 = NCAA football total points over 51
     // KXHIGHNY-24DEC-T63 = NYC high temp threshold
+    
+    // Check for sports totals (over/under)
+    if ticker.contains("TOTAL") {
+        let parts: Vec<&str> = ticker.split('-').collect();
+        if let Some(threshold) = parts.last() {
+            if threshold.chars().all(|c| c.is_numeric()) {
+                let sport = if ticker.contains("NFL") { "NFL" }
+                          else if ticker.contains("NBA") { "NBA" }
+                          else if ticker.contains("NHL") { "NHL" }
+                          else if ticker.contains("MLB") { "MLB" }
+                          else if ticker.contains("NCAAF") || ticker.contains("CFB") { "College Football" }
+                          else if ticker.contains("NCAAB") || ticker.contains("CBB") { "College Basketball" }
+                          else { "Game" };
+                
+                // Extract teams if possible
+                if parts.len() >= 3 {
+                    if let Some(teams_part) = parts.get(parts.len() - 2) {
+                        if teams_part.len() >= 6 {
+                            let team_codes = &teams_part[teams_part.len()-6..];
+                            let away = &team_codes[..3];
+                            let home = &team_codes[3..];
+                            return format!("Betting YES = Total points OVER {} | {} @ {} ({})", 
+                                threshold, away.to_uppercase(), home.to_uppercase(), sport);
+                        }
+                    }
+                }
+                
+                return format!("Betting YES = Total points OVER {} ({})", threshold, sport);
+            }
+        }
+    }
     
     if ticker.contains("NHLGAME") || ticker.contains("NFLGAME") || 
        ticker.contains("NBAGAME") || ticker.contains("MLBGAME") {
@@ -144,6 +176,28 @@ pub fn parse_ticker_details(ticker: &str) -> String {
                     return format!("Betting YES = {} wins | {} @ {} ({})", 
                         outcome.to_uppercase(), away.to_uppercase(), home.to_uppercase(), sport);
                 }
+            }
+        }
+    // Check for point spreads
+    } else if ticker.contains("SPREAD") {
+        let parts: Vec<&str> = ticker.split('-').collect();
+        if let Some(last_part) = parts.last() {
+            // Could be like "CAR3" meaning Carolina -3
+            let team = last_part.chars().take_while(|c| c.is_alphabetic()).collect::<String>();
+            let spread = last_part.chars().skip_while(|c| c.is_alphabetic()).collect::<String>();
+            
+            if !team.is_empty() && !spread.is_empty() {
+                return format!("Betting YES = {} covers -{} point spread", 
+                    team.to_uppercase(), spread);
+            }
+        }
+    // Check for player props (touchdowns, points, etc)
+    } else if ticker.contains("TD") || ticker.contains("SCORE") {
+        let parts: Vec<&str> = ticker.split('-').collect();
+        if let Some(threshold) = parts.last() {
+            if threshold.chars().all(|c| c.is_numeric()) {
+                let prop_type = if ticker.contains("TD") { "touchdowns" } else { "points" };
+                return format!("Betting YES = Player gets {} or more {}", threshold, prop_type);
             }
         }
     } else if ticker.contains("HIGH") || ticker.contains("LOW") {
