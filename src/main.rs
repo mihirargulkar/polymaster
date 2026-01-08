@@ -10,8 +10,8 @@ use tokio::time;
 use std::io::{self, Write};
 
 #[derive(Parser)]
-#[command(name = "whale-watcher")]
-#[command(about = "Monitor large transactions on Polymarket and Kalshi", long_about = None)]
+#[command(name = "wwatcher")]
+#[command(about = "Whale Watcher - Monitor large transactions on Polymarket and Kalshi", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -111,7 +111,7 @@ async fn setup_config() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("{}", "Configuration saved successfully.".bright_green());
     println!();
-    println!("Run {} to start watching for whale transactions.", "whale-watcher watch".bright_cyan());
+    println!("Run {} to start watching for whale transactions.", "wwatcher watch".bright_cyan());
 
     Ok(())
 }
@@ -162,7 +162,7 @@ async fn show_status() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         Err(_) => {
-            println!("No configuration found. Run 'whale-watcher setup' to configure.");
+            println!("No configuration found. Run 'wwatcher setup' to configure.");
         }
     }
 
@@ -411,11 +411,20 @@ fn print_kalshi_alert(trade: &kalshi::Trade, value: f64, _wallet_activity: Optio
 }
 
 fn play_alert_sound() {
+    play_sound_internal("/System/Library/Sounds/Ping.aiff");
+}
+
+fn play_anomaly_sound() {
+    // Use more attention-grabbing sound for anomalies
+    play_sound_internal("/System/Library/Sounds/Funk.aiff");
+}
+
+fn play_sound_internal(sound_file: &str) {
     // macOS: Use afplay with system sound
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("afplay")
-            .arg("/System/Library/Sounds/Ping.aiff")
+            .arg(sound_file)
             .spawn()
             .ok();
     }
@@ -497,6 +506,9 @@ fn detect_anomalies(price: f64, size: f64, value: f64, wallet_activity: Option<&
     
     // Display anomalies
     if !anomalies.is_empty() {
+        // Play distinctive anomaly sound
+        play_anomaly_sound();
+        
         println!();
         println!("{}", "[ANOMALY INDICATORS]".bright_red().bold());
         for anomaly in anomalies {

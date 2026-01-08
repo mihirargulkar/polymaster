@@ -21,7 +21,7 @@ fn config_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
     let config_dir = dirs::config_dir()
         .ok_or("Could not determine config directory")?;
     
-    let app_config_dir = config_dir.join("whale-watcher");
+    let app_config_dir = config_dir.join("wwatcher");
     fs::create_dir_all(&app_config_dir)?;
     
     Ok(app_config_dir.join("config.json"))

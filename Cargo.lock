@@ -1952,23 +1952,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "whale-watcher"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "clap",
- "colored",
- "config",
- "dirs",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "tokio-stream",
-]
-
-[[package]]
 name = "windows-core"
 version = "0.62.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2289,6 +2272,23 @@ name = "writeable"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9edde0db4769d2dc68579893f2306b26c6ecfbe0ef499b013d731b7b9247e0b9"
+
+[[package]]
+name = "wwatcher"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "clap",
+ "colored",
+ "config",
+ "dirs",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+]
 
 [[package]]
 name = "yaml-rust2"

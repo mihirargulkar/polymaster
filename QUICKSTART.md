@@ -9,14 +9,14 @@ cd polymaster
 cargo build --release
 ```
 
-The binary will be at `target/release/whale-watcher`
+The binary will be at `target/release/wwatcher`
 
 ## Step 2: Run Without Setup (Optional Configuration)
 
 You can start watching immediately without any setup:
 
 ```bash
-./target/release/whale-watcher watch
+./target/release/wwatcher watch
 ```
 
 This will:
@@ -30,13 +30,13 @@ This will:
 
 ```bash
 # Watch for $50k+ trades
-./target/release/whale-watcher watch -t 50000
+./target/release/wwatcher watch -t 50000
 
 # Check every 30 seconds instead
-./target/release/whale-watcher watch -i 30
+./target/release/wwatcher watch -i 30
 
 # Both together - $100k threshold, check every minute
-./target/release/whale-watcher watch -t 100000 -i 60
+./target/release/wwatcher watch -t 100000 -i 60
 ```
 
 ## Step 4: Optional - Add Kalshi Authentication
@@ -44,7 +44,7 @@ This will:
 If you want authenticated Kalshi access:
 
 ```bash
-./target/release/whale-watcher setup
+./target/release/wwatcher setup
 ```
 
 Follow the prompts to add your Kalshi API credentials.
@@ -61,7 +61,7 @@ Follow the prompts to add your Kalshi API credentials.
 - **Optional auth**: For higher rate limits
   - Create account: https://kalshi.com
   - Generate keys: https://kalshi.com/profile/api-keys
-  - Add via: `./target/release/whale-watcher setup`
+  - Add via: `./target/release/wwatcher setup`
 
 ## Example Output
 
@@ -90,13 +90,13 @@ Asset ID: 65396714035221124737...
 1. **Lower thresholds** for more alerts: `-t 10000`
 2. **Slower polling** to reduce API calls: `-i 30`
 3. **Install system-wide**: `cargo install --path .`
-4. **Run in background**: `nohup whale-watcher watch > whales.log 2>&1 &`
+4. **Run in background**: `nohup wwatcher watch > whales.log 2>&1 &`
 5. **Anomaly detection**: Automatically identifies unusual trading patterns
 
 ## Troubleshooting
 
 **Q: I get rate limit errors**  
-A: Increase the interval: `whale-watcher watch -i 60`
+A: Increase the interval: `wwatcher watch -i 60`
 
 **Q: No whales detected**  
 A: Markets might be quiet. Try lowering threshold: `-t 10000`
@@ -107,7 +107,7 @@ A: Both APIs are public and should work. Check your internet connection.
 ## Next Steps
 
 - Read the full [README.md](README.md) for detailed documentation
-- Explore command options: `whale-watcher watch --help`
-- Check configuration: `whale-watcher status`
+- Explore command options: `wwatcher watch --help`
+- Check configuration: `wwatcher status`
 
 Happy whale watching!

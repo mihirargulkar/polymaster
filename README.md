@@ -39,7 +39,7 @@ cargo build --release
 cargo install --path .
 ```
 
-The binary will be available at `target/release/whale-watcher` or in your cargo bin directory.
+The binary will be available at `target/release/wwatcher` or in your cargo bin directory.
 
 ## Quick Start
 
@@ -48,31 +48,31 @@ The binary will be available at `target/release/whale-watcher` or in your cargo 
 Configure API credentials if you want authenticated access to Kalshi (optional):
 
 ```bash
-whale-watcher setup
+wwatcher setup
 ```
 
 This will guide you through:
 - **Kalshi API credentials** (optional) - Generate at https://kalshi.com/profile/api-keys
 - **Polymarket** - No API key needed! Public access only
 
-Your configuration is saved to `~/.config/whale-watcher/config.json` (macOS/Linux) or equivalent on Windows.
+Your configuration is saved to `~/.config/wwatcher/config.json` (macOS/Linux) or equivalent on Windows.
 
 ### 2. Watch for Whales
 
 Start monitoring with default settings ($25,000 threshold, 5 second polling):
 
 ```bash
-whale-watcher watch
+wwatcher watch
 ```
 
 Or customize:
 
 ```bash
 # Watch for $50k+ trades, check every 30 seconds
-whale-watcher watch --threshold 50000 --interval 30
+wwatcher watch --threshold 50000 --interval 30
 
 # Watch for $10k+ trades, check every 10 seconds  
-whale-watcher watch -t 10000 -i 10
+wwatcher watch -t 10000 -i 10
 ```
 
 ### 3. Check Status
@@ -80,7 +80,7 @@ whale-watcher watch -t 10000 -i 10
 View your current configuration:
 
 ```bash
-whale-watcher status
+wwatcher status
 ```
 
 ## API Information
@@ -105,7 +105,7 @@ The tool uses the Polymarket Data API to fetch recent trades. This is a public e
 For public trade data, no API key is needed. If you want access to your personal orders and fills, you can:
 1. Create an account at https://kalshi.com
 2. Generate API credentials at https://kalshi.com/profile/api-keys
-3. Run `whale-watcher setup` and enter your credentials
+3. Run `wwatcher setup` and enter your credentials
 
 ## Alert Example
 
@@ -131,7 +131,7 @@ Asset ID: 65396714035221124737...
 
 ## Command Reference
 
-### `whale-watcher watch`
+### `wwatcher watch`
 
 Start monitoring for large transactions.
 
@@ -141,33 +141,33 @@ Start monitoring for large transactions.
 
 **Examples:**
 ```bash
-whale-watcher watch                        # Default: $25k threshold, 5s interval
-whale-watcher watch -t 50000               # $50k threshold
-whale-watcher watch -i 30                  # Check every 30 seconds
-whale-watcher watch -t 100000 -i 60        # $100k threshold, check every minute
+wwatcher watch                        # Default: $25k threshold, 5s interval
+wwatcher watch -t 50000               # $50k threshold
+wwatcher watch -i 30                  # Check every 30 seconds
+wwatcher watch -t 100000 -i 60        # $100k threshold, check every minute
 ```
 
-### `whale-watcher setup`
+### `wwatcher setup`
 
 Interactive setup wizard to configure API credentials.
 
 ```bash
-whale-watcher setup
+wwatcher setup
 ```
 
-### `whale-watcher status`
+### `wwatcher status`
 
 Show current configuration status.
 
 ```bash
-whale-watcher status
+wwatcher status
 ```
 
 ## Configuration File
 
 Configuration is stored at:
-- **macOS/Linux**: `~/.config/whale-watcher/config.json`
-- **Windows**: `%APPDATA%\whale-watcher\config.json`
+- **macOS/Linux**: `~/.config/wwatcher/config.json`
+- **Windows**: `%APPDATA%\wwatcher\config.json`
 
 Example `config.json`:
 ```json
@@ -190,7 +190,7 @@ Built with:
 
 ### "No configuration found" warning
 
-This is normal! The tool works without configuration using public APIs. Run `whale-watcher setup` only if you want to add Kalshi authentication.
+This is normal! The tool works without configuration using public APIs. Run `wwatcher setup` only if you want to add Kalshi authentication.
 
 ### API errors
 
@@ -201,7 +201,7 @@ This is normal! The tool works without configuration using public APIs. Run `wha
 
 If you're getting rate limited:
 - Increase the `--interval` to poll less frequently
-- For Kalshi: Add API credentials via `whale-watcher setup`
+- For Kalshi: Add API credentials via `wwatcher setup`
 
 ## Documentation
 

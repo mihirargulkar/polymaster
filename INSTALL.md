@@ -8,7 +8,7 @@ cd polymaster
 cargo build --release
 ```
 
-The binary will be located at `target/release/whale-watcher`
+The binary will be located at `target/release/wwatcher`
 
 ## System-wide Installation
 
@@ -22,51 +22,51 @@ This installs the binary to your cargo bin directory (typically `~/.cargo/bin`),
 
 ```bash
 # Check if installation worked
-whale-watcher --help
+wwatcher --help
 
 # View status
-whale-watcher status
+wwatcher status
 ```
 
 ## First Run
 
 1. **No Setup Required**: The tool works immediately with public APIs
    ```bash
-   whale-watcher watch
+   wwatcher watch
    ```
 
 2. **Optional**: Configure Kalshi credentials for higher rate limits
    ```bash
-   whale-watcher setup
+   wwatcher setup
    ```
 
 ## Usage
 
 ```bash
 # Default: $25k threshold, 5-second polling
-whale-watcher watch
+wwatcher watch
 
 # Custom threshold
-whale-watcher watch -t 50000
+wwatcher watch -t 50000
 
 # Custom interval
-whale-watcher watch -i 30
+wwatcher watch -i 30
 
 # Both
-whale-watcher watch -t 100000 -i 60
+wwatcher watch -t 100000 -i 60
 ```
 
 ## Running in Background
 
 ```bash
 # With output to log file
-nohup whale-watcher watch > whale-alerts.log 2>&1 &
+nohup wwatcher watch > whale-alerts.log 2>&1 &
 
 # Save the process ID
-echo $! > whale-watcher.pid
+echo $! > wwatcher.pid
 
 # To stop later
-kill $(cat whale-watcher.pid)
+kill $(cat wwatcher.pid)
 ```
 
 ## Monitoring the Log
@@ -122,7 +122,7 @@ cargo build --release
 
 ```bash
 # Make binary executable
-chmod +x target/release/whale-watcher
+chmod +x target/release/wwatcher
 ```
 
 ### API Issues
@@ -156,17 +156,17 @@ Build with:
 cargo build --release
 ```
 
-Binary will be at `target\release\whale-watcher.exe`
+Binary will be at `target\release\wwatcher.exe`
 
 ## Uninstall
 
 ```bash
 # If installed system-wide
-cargo uninstall whale-watcher
+cargo uninstall wwatcher
 
 # Remove repository
 rm -rf polymaster
 
 # Remove config (optional)
-rm ~/.config/whale-watcher/config.json
+rm ~/.config/wwatcher/config.json
 ```
