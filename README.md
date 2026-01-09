@@ -191,11 +191,6 @@ If you're getting rate limited:
 - Increase the `--interval` to poll less frequently
 - For Kalshi: Add API credentials via `wwatcher setup`
 
-## Documentation
-
-- [QUICKSTART.md](QUICKSTART.md) - Quick start guide
-- [ANOMALY_DETECTION.md](ANOMALY_DETECTION.md) - Detailed anomaly detection patterns and use cases
-- [API_REFERENCE.md](API_REFERENCE.md) - API documentation and technical details
 
 ## License
 

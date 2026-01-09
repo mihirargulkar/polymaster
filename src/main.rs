@@ -280,7 +280,9 @@ async fn watch_whales(threshold: u64, interval: u64) -> Result<(), Box<dyn std::
 }
 
 fn print_whale_alert(platform: &str, trade: &polymarket::Trade, value: f64, wallet_activity: Option<&types::WalletActivity>) {
-    // Enhanced alert sound for repeat actors
+    let is_sell = trade.side.to_uppercase() == "SELL";
+    
+    // Enhanced alert sound for repeat actors or sells
     if let Some(activity) = wallet_activity {
         if activity.is_repeat_actor || activity.is_heavy_actor {
             // Triple beep for repeat/heavy actors
@@ -298,8 +300,20 @@ fn print_whale_alert(platform: &str, trade: &polymarket::Trade, value: f64, wall
     
     println!();
     
-    // Enhanced header for repeat actors
-    let header = if let Some(activity) = wallet_activity {
+    // Enhanced header for repeat actors or exits
+    let header = if is_sell {
+        if let Some(activity) = wallet_activity {
+            if activity.is_heavy_actor {
+                format!("[HIGH PRIORITY] WHALE EXITING POSITION - {}", platform)
+            } else if activity.is_repeat_actor {
+                format!("[ELEVATED ALERT] WHALE EXITING POSITION - {}", platform)
+            } else {
+                format!("[ALERT] WHALE EXITING POSITION - {}", platform)
+            }
+        } else {
+            format!("[ALERT] WHALE EXITING POSITION - {}", platform)
+        }
+    } else if let Some(activity) = wallet_activity {
         if activity.is_heavy_actor {
             format!("[HIGH PRIORITY ALERT] REPEAT HEAVY ACTOR - {}", platform)
         } else if activity.is_repeat_actor {
@@ -325,9 +339,14 @@ fn print_whale_alert(platform: &str, trade: &polymarket::Trade, value: f64, wall
             let action = if trade.side.to_uppercase() == "BUY" {
                 format!("BUYING '{}' shares", outcome)
             } else {
-                format!("SELLING '{}' shares", outcome)
+                format!("SELLING '{}' shares (EXITING POSITION)", outcome)
             };
-            println!("Position:   {}", action.bright_yellow().bold());
+            let action_color = if trade.side.to_uppercase() == "SELL" {
+                action.bright_red().bold()
+            } else {
+                action.bright_yellow().bold()
+            };
+            println!("Position:   {}", action_color);
             println!("Prediction: Market believes '{}' has {:.1}% chance", 
                 outcome, trade.price * 100.0);
         }
@@ -342,7 +361,12 @@ fn print_whale_alert(platform: &str, trade: &polymarket::Trade, value: f64, wall
         format!("${:.2}", value).bright_yellow().bold()
     );
     println!("Contracts:  {:.2} @ ${:.4} each", trade.size, trade.price);
-    println!("Action:     {} shares", trade.side.to_uppercase().bright_magenta());
+    let action_text = if is_sell {
+        format!("{} shares", trade.side.to_uppercase()).bright_red()
+    } else {
+        format!("{} shares", trade.side.to_uppercase()).bright_magenta()
+    };
+    println!("Action:     {}", action_text);
     println!("Timestamp:  {}", trade.timestamp);
     
     // Display wallet activity if available
@@ -375,14 +399,20 @@ fn print_whale_alert(platform: &str, trade: &polymarket::Trade, value: f64, wall
 }
 
 fn print_kalshi_alert(trade: &kalshi::Trade, value: f64, _wallet_activity: Option<&types::WalletActivity>) {
+    let is_sell = trade.taker_side.to_lowercase() == "sell";
+    
     // Play alert sound immediately
     play_alert_sound();
     
     println!();
-    println!(
-        "{}",
+    
+    let header = if is_sell {
+        "[ALERT] WHALE EXITING POSITION - Kalshi".bright_red().bold()
+    } else {
         "[ALERT] LARGE TRANSACTION DETECTED - Kalshi".bright_green().bold()
-    );
+    };
+    
+    println!("{}", header);
     println!("{}", "=".repeat(70).dimmed());
     
     // Display market title if available
@@ -392,8 +422,24 @@ fn print_kalshi_alert(trade: &kalshi::Trade, value: f64, _wallet_activity: Optio
     
     // Parse and display what the bet means
     let bet_details = kalshi::parse_ticker_details(&trade.ticker);
-    println!("Position:   {}", bet_details.bright_yellow().bold());
-    println!("Direction:  {} (buying {} outcome)", trade.taker_side.to_uppercase().bright_magenta(), trade.taker_side.to_uppercase());
+    let bet_color = if is_sell {
+        bet_details.bright_red().bold()
+    } else {
+        bet_details.bright_yellow().bold()
+    };
+    println!("Position:   {}", bet_color);
+    
+    let direction_text = if is_sell {
+        format!("{} (EXITING {} position)", trade.taker_side.to_uppercase(), trade.taker_side.to_uppercase())
+    } else {
+        format!("{} (buying {} outcome)", trade.taker_side.to_uppercase(), trade.taker_side.to_uppercase())
+    };
+    let direction_color = if is_sell {
+        direction_text.bright_red()
+    } else {
+        direction_text.bright_magenta()
+    };
+    println!("Direction:  {}", direction_color);
     
     println!();
     println!("{}", "TRANSACTION DETAILS".dimmed());
