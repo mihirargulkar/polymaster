@@ -93,26 +93,32 @@ pub async fn fetch_recent_trades() -> Result<Vec<Trade>, PolymarketError> {
         let trades = items
             .into_iter()
             .filter_map(|item| {
-                // Only process TRADE type activities
+                // Only process TRADE type activities with all required fields
                 if item.activity_type.as_deref() != Some("TRADE") {
                     return None;
                 }
 
+                // Skip trades missing critical data
+                let market = item.market?;
+                let asset_id = item.asset?;
+                let side = item.side?;
+                let size = item.size?;
+                let price = item.price?;
+
                 Some(Trade {
                     id: item.id.clone(),
-                    market: item.market.unwrap_or_default(),
-                    asset_id: item.asset.unwrap_or_default(),
-                    side: item.side.unwrap_or_default(),
-                    size: item.size.unwrap_or(0.0),
-                    price: item.price.unwrap_or(0.0),
+                    market,
+                    asset_id,
+                    side,
+                    size,
+                    price,
                     timestamp: item
                         .timestamp
-                        .map(|ts| {
+                        .and_then(|ts| {
                             chrono::DateTime::from_timestamp(ts, 0)
                                 .map(|dt| dt.to_rfc3339())
-                                .unwrap_or_else(|| "Unknown".to_string())
                         })
-                        .unwrap_or_else(|| "Unknown".to_string()),
+                        .unwrap_or_else(|| format!("timestamp_error_{}", item.id)),
                     market_title: None,
                     outcome: None,
                     wallet_id: item.user.or(item.maker).or(item.proxy_wallet),
@@ -132,21 +138,27 @@ pub async fn fetch_recent_trades() -> Result<Vec<Trade>, PolymarketError> {
                     return None;
                 }
 
+                // Skip trades missing critical data
+                let market = item.market?;
+                let asset_id = item.asset?;
+                let side = item.side?;
+                let size = item.size?;
+                let price = item.price?;
+
                 Some(Trade {
                     id: item.id.clone(),
-                    market: item.market.unwrap_or_default(),
-                    asset_id: item.asset.unwrap_or_default(),
-                    side: item.side.unwrap_or_default(),
-                    size: item.size.unwrap_or(0.0),
-                    price: item.price.unwrap_or(0.0),
+                    market,
+                    asset_id,
+                    side,
+                    size,
+                    price,
                     timestamp: item
                         .timestamp
-                        .map(|ts| {
+                        .and_then(|ts| {
                             chrono::DateTime::from_timestamp(ts, 0)
                                 .map(|dt| dt.to_rfc3339())
-                                .unwrap_or_else(|| "Unknown".to_string())
                         })
-                        .unwrap_or_else(|| "Unknown".to_string()),
+                        .unwrap_or_else(|| format!("timestamp_error_{}", item.id)),
                     market_title: None,
                     outcome: None,
                     wallet_id: item.user.or(item.maker).or(item.proxy_wallet),
@@ -181,14 +193,9 @@ pub async fn fetch_market_info(market_id: &str) -> Option<(String, String)> {
         Ok(response) if response.status().is_success() => {
             if let Ok(text) = response.text().await {
                 if let Ok(market) = serde_json::from_str::<MarketResponse>(&text) {
-                    let title = market
-                        .question
-                        .or(market.title)
-                        .unwrap_or_else(|| "Unknown Market".to_string());
-                    let outcome = market
-                        .outcomes
-                        .and_then(|o| o.first().cloned())
-                        .unwrap_or_else(|| "Yes".to_string());
+                    // Only return data if we have both title and outcome from API
+                    let title = market.question.or(market.title)?;
+                    let outcome = market.outcomes.and_then(|o| o.first().cloned())?;
                     return Some((title, outcome));
                 }
             }

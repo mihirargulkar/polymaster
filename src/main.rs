@@ -414,6 +414,10 @@ async fn watch_whales(threshold: u64, interval: u64) -> Result<(), Box<dyn std::
                             if let Some(title) = kalshi::fetch_market_info(&trade.ticker).await {
                                 trade.market_title = Some(title);
                             }
+                            
+                            // Extract outcome from ticker
+                            let outcome = kalshi::parse_ticker_details(&trade.ticker);
+                            
                             // Note: Kalshi doesn't expose wallet IDs in public API
                             print_kalshi_alert(trade, trade_value, None);
 
@@ -425,7 +429,7 @@ async fn watch_whales(threshold: u64, interval: u64) -> Result<(), Box<dyn std::
                                         WebhookAlert {
                                             platform: "Kalshi",
                                             market_title: trade.market_title.as_deref(),
-                                            outcome: None,
+                                            outcome: Some(&outcome),
                                             side: &trade.taker_side,
                                             value: trade_value,
                                             price: trade.yes_price / 100.0,
