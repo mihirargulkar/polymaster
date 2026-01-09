@@ -8,8 +8,6 @@ pub enum KalshiError {
     RequestFailed(#[from] reqwest::Error),
     #[error("Failed to parse response: {0}")]
     ParseError(String),
-    #[error("Authentication failed: {0}")]
-    AuthError(String),
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -40,16 +38,14 @@ pub struct Trade {
 struct TradesResponse {
     #[serde(default)]
     trades: Vec<Trade>,
-    #[serde(default)]
-    cursor: Option<String>,
 }
 
 pub async fn fetch_recent_trades(config: Option<&Config>) -> Result<Vec<Trade>, KalshiError> {
     let client = reqwest::Client::new();
-    
+
     // Kalshi's public trades endpoint
     let url = "https://api.elections.kalshi.com/trade-api/v2/markets/trades";
-    
+
     let mut request = client
         .get(url)
         .query(&[("limit", "100")])
@@ -57,7 +53,9 @@ pub async fn fetch_recent_trades(config: Option<&Config>) -> Result<Vec<Trade>, 
 
     // Add authentication if credentials are provided
     if let Some(cfg) = config {
-        if let (Some(key_id), Some(_private_key)) = (&cfg.kalshi_api_key_id, &cfg.kalshi_private_key) {
+        if let (Some(key_id), Some(_private_key)) =
+            (&cfg.kalshi_api_key_id, &cfg.kalshi_private_key)
+        {
             // For simplicity, we'll use basic auth
             // In production, you'd implement proper HMAC signature
             request = request.header("KALSHI-ACCESS-KEY", key_id);
@@ -74,7 +72,7 @@ pub async fn fetch_recent_trades(config: Option<&Config>) -> Result<Vec<Trade>, 
     }
 
     let text = response.text().await?;
-    
+
     match serde_json::from_str::<TradesResponse>(&text) {
         Ok(response) => Ok(response.trades),
         Err(e) => {
@@ -98,20 +96,25 @@ struct MarketData {
 
 pub async fn fetch_market_info(ticker: &str) -> Option<String> {
     let client = reqwest::Client::new();
-    let url = format!("https://api.elections.kalshi.com/trade-api/v2/markets/{}", ticker);
-    
+    let url = format!(
+        "https://api.elections.kalshi.com/trade-api/v2/markets/{}",
+        ticker
+    );
+
     match client.get(&url).send().await {
         Ok(response) if response.status().is_success() => {
             if let Ok(text) = response.text().await {
                 if let Ok(market_response) = serde_json::from_str::<MarketResponse>(&text) {
-                    return market_response.market.title
+                    return market_response
+                        .market
+                        .title
                         .or(market_response.market.subtitle);
                 }
             }
         }
         _ => {}
     }
-    
+
     None
 }
 
@@ -122,79 +125,116 @@ pub fn parse_ticker_details(ticker: &str) -> String {
     // KXNCAAFTOTAL-26JAN08MIAMISS-51 = NCAA football total points over 51
     // KXHIGHNY-24DEC-T63 = NYC high temp threshold
     // KXETHD-26JAN0818-T3109.99 = ETH price threshold
-    
+
     // Cryptocurrency/Stock price thresholds
-    if ticker.contains("ETH") || ticker.contains("BTC") || ticker.contains("SOL") || 
-       ticker.contains("SPX") || ticker.contains("TSLA") {
+    if ticker.contains("ETH")
+        || ticker.contains("BTC")
+        || ticker.contains("SOL")
+        || ticker.contains("SPX")
+        || ticker.contains("TSLA")
+    {
         let parts: Vec<&str> = ticker.split('-').collect();
         if let Some(threshold_part) = parts.last() {
             if threshold_part.starts_with('T') || threshold_part.starts_with('t') {
                 let price = &threshold_part[1..];
-                let asset = if ticker.contains("ETH") { "Ethereum (ETH)" }
-                          else if ticker.contains("BTC") { "Bitcoin (BTC)" }
-                          else if ticker.contains("SOL") { "Solana (SOL)" }
-                          else if ticker.contains("SPX") { "S&P 500" }
-                          else if ticker.contains("TSLA") { "Tesla" }
-                          else { "Asset" };
-                
+                let asset = if ticker.contains("ETH") {
+                    "Ethereum (ETH)"
+                } else if ticker.contains("BTC") {
+                    "Bitcoin (BTC)"
+                } else if ticker.contains("SOL") {
+                    "Solana (SOL)"
+                } else if ticker.contains("SPX") {
+                    "S&P 500"
+                } else if ticker.contains("TSLA") {
+                    "Tesla"
+                } else {
+                    "Asset"
+                };
+
                 return format!("Betting YES = {} price ≥ ${} at expiry", asset, price);
             }
         }
     }
-    
+
     // Check for sports totals (over/under)
     if ticker.contains("TOTAL") {
         let parts: Vec<&str> = ticker.split('-').collect();
         if let Some(threshold) = parts.last() {
             if threshold.chars().all(|c| c.is_numeric()) {
-                let sport = if ticker.contains("NFL") { "NFL" }
-                          else if ticker.contains("NBA") { "NBA" }
-                          else if ticker.contains("NHL") { "NHL" }
-                          else if ticker.contains("MLB") { "MLB" }
-                          else if ticker.contains("NCAAF") || ticker.contains("CFB") { "College Football" }
-                          else if ticker.contains("NCAAB") || ticker.contains("CBB") { "College Basketball" }
-                          else { "Game" };
-                
+                let sport = if ticker.contains("NFL") {
+                    "NFL"
+                } else if ticker.contains("NBA") {
+                    "NBA"
+                } else if ticker.contains("NHL") {
+                    "NHL"
+                } else if ticker.contains("MLB") {
+                    "MLB"
+                } else if ticker.contains("NCAAF") || ticker.contains("CFB") {
+                    "College Football"
+                } else if ticker.contains("NCAAB") || ticker.contains("CBB") {
+                    "College Basketball"
+                } else {
+                    "Game"
+                };
+
                 // Extract teams if possible
                 if parts.len() >= 3 {
                     if let Some(teams_part) = parts.get(parts.len() - 2) {
                         if teams_part.len() >= 6 {
-                            let team_codes = &teams_part[teams_part.len()-6..];
+                            let team_codes = &teams_part[teams_part.len() - 6..];
                             let away = &team_codes[..3];
                             let home = &team_codes[3..];
-                            return format!("Betting YES = Total points OVER {} | {} @ {} ({})", 
-                                threshold, away.to_uppercase(), home.to_uppercase(), sport);
+                            return format!(
+                                "Betting YES = Total points OVER {} | {} @ {} ({})",
+                                threshold,
+                                away.to_uppercase(),
+                                home.to_uppercase(),
+                                sport
+                            );
                         }
                     }
                 }
-                
+
                 return format!("Betting YES = Total points OVER {} ({})", threshold, sport);
             }
         }
     }
-    
-    if ticker.contains("NHLGAME") || ticker.contains("NFLGAME") || 
-       ticker.contains("NBAGAME") || ticker.contains("MLBGAME") {
+
+    if ticker.contains("NHLGAME")
+        || ticker.contains("NFLGAME")
+        || ticker.contains("NBAGAME")
+        || ticker.contains("MLBGAME")
+    {
         // Sports game format
         let parts: Vec<&str> = ticker.split('-').collect();
         if parts.len() >= 3 {
             let outcome = parts.last().unwrap_or(&"");
-            
+
             // Extract team codes from middle part
             if let Some(teams_part) = parts.get(parts.len() - 2) {
                 // Format like "26JAN08ANACAR" - extract last 6 chars for teams
                 if teams_part.len() >= 6 {
-                    let team_codes = &teams_part[teams_part.len()-6..];
+                    let team_codes = &teams_part[teams_part.len() - 6..];
                     let away = &team_codes[..3];
                     let home = &team_codes[3..];
-                    
-                    let sport = if ticker.contains("NHL") { "NHL" }
-                              else if ticker.contains("NFL") { "NFL" }
-                              else if ticker.contains("NBA") { "NBA" }
-                              else { "MLB" };
-                    
-                    return format!("Betting YES = {} wins | {} @ {} ({})", 
-                        outcome.to_uppercase(), away.to_uppercase(), home.to_uppercase(), sport);
+
+                    let sport = if ticker.contains("NHL") {
+                        "NHL"
+                    } else if ticker.contains("NFL") {
+                        "NFL"
+                    } else if ticker.contains("NBA") {
+                        "NBA"
+                    } else {
+                        "MLB"
+                    };
+
+                    return format!(
+                        "Betting YES = {} wins | {} @ {} ({})",
+                        outcome.to_uppercase(),
+                        away.to_uppercase(),
+                        home.to_uppercase(),
+                        sport
+                    );
                 }
             }
         }
@@ -203,12 +243,21 @@ pub fn parse_ticker_details(ticker: &str) -> String {
         let parts: Vec<&str> = ticker.split('-').collect();
         if let Some(last_part) = parts.last() {
             // Could be like "CAR3" meaning Carolina -3
-            let team = last_part.chars().take_while(|c| c.is_alphabetic()).collect::<String>();
-            let spread = last_part.chars().skip_while(|c| c.is_alphabetic()).collect::<String>();
-            
+            let team = last_part
+                .chars()
+                .take_while(|c| c.is_alphabetic())
+                .collect::<String>();
+            let spread = last_part
+                .chars()
+                .skip_while(|c| c.is_alphabetic())
+                .collect::<String>();
+
             if !team.is_empty() && !spread.is_empty() {
-                return format!("Betting YES = {} covers -{} point spread", 
-                    team.to_uppercase(), spread);
+                return format!(
+                    "Betting YES = {} covers -{} point spread",
+                    team.to_uppercase(),
+                    spread
+                );
             }
         }
     // Check for player props (touchdowns, points, etc)
@@ -216,8 +265,15 @@ pub fn parse_ticker_details(ticker: &str) -> String {
         let parts: Vec<&str> = ticker.split('-').collect();
         if let Some(threshold) = parts.last() {
             if threshold.chars().all(|c| c.is_numeric()) {
-                let prop_type = if ticker.contains("TD") { "touchdowns" } else { "points" };
-                return format!("Betting YES = Player gets {} or more {}", threshold, prop_type);
+                let prop_type = if ticker.contains("TD") {
+                    "touchdowns"
+                } else {
+                    "points"
+                };
+                return format!(
+                    "Betting YES = Player gets {} or more {}",
+                    threshold, prop_type
+                );
             }
         }
     } else if ticker.contains("HIGH") || ticker.contains("LOW") {
@@ -225,14 +281,12 @@ pub fn parse_ticker_details(ticker: &str) -> String {
         if ticker.contains("T") {
             let parts: Vec<&str> = ticker.split('-').collect();
             if let Some(threshold_part) = parts.last() {
-                if threshold_part.starts_with('T') {
-                    let temp = &threshold_part[1..];
-                    let location = if ticker.contains("NY") { "NYC" }
-                                  else if ticker.contains("LA") { "LA" }
-                                  else if ticker.contains("CHI") { "Chicago" }
-                                  else { "Location" };
-                    
-                    let metric = if ticker.contains("HIGH") { "High" } else { "Low" };
+                if let Some(temp) = threshold_part.strip_prefix('T') {
+                    let metric = if ticker.contains("HIGH") {
+                        "High"
+                    } else {
+                        "Low"
+                    };
                     return format!("Betting YES = {} temp ≥ {}°F", metric, temp);
                 }
             }
@@ -244,7 +298,7 @@ pub fn parse_ticker_details(ticker: &str) -> String {
             return format!("Betting YES = {} wins", outcome.to_uppercase());
         }
     }
-    
+
     // Default: try to extract outcome from last part
     let parts: Vec<&str> = ticker.split('-').collect();
     if let Some(outcome) = parts.last() {
@@ -252,6 +306,6 @@ pub fn parse_ticker_details(ticker: &str) -> String {
             return format!("Betting YES = {} outcome", outcome.to_uppercase());
         }
     }
-    
+
     String::from("Yes/No market - check ticker for details")
 }
