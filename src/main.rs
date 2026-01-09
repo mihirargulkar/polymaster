@@ -824,6 +824,19 @@ struct WebhookAlert<'a> {
     wallet_activity: Option<&'a types::WalletActivity>,
 }
 
+// Escape special characters that might cause issues with HTML/Markdown parsers
+fn escape_special_chars(s: &str) -> String {
+    s.replace('&', "and")
+        .replace('<', "less than")
+        .replace('>', "greater than")
+        .replace('≥', ">=")
+        .replace('≤', "<=")
+        .replace('°', " degrees")
+        .replace('|', "-")
+        .replace('[', "(")
+        .replace(']', ")")
+}
+
 async fn send_webhook_alert(webhook_url: &str, alert: WebhookAlert<'_>) {
     use serde_json::json;
 
@@ -838,8 +851,8 @@ async fn send_webhook_alert(webhook_url: &str, alert: WebhookAlert<'_>) {
         "price": alert.price,
         "size": alert.size,
         "timestamp": alert.timestamp,
-        "market_title": alert.market_title,
-        "outcome": alert.outcome,
+        "market_title": alert.market_title.map(escape_special_chars),
+        "outcome": alert.outcome.map(escape_special_chars),
     });
 
     // Add wallet information if available
