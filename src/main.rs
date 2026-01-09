@@ -856,6 +856,7 @@ async fn send_webhook_alert(webhook_url: &str, alert: WebhookAlert<'_>) {
         "action": alert.side.to_uppercase(),
         "value": alert.value,
         "price": alert.price,
+        "price_percent": (alert.price * 100.0).round() as i32,
         "size": alert.size,
         "timestamp": alert.timestamp,
         "market_title": alert.market_title.map(escape_special_chars),
