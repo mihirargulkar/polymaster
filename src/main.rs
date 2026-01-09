@@ -824,30 +824,29 @@ struct WebhookAlert<'a> {
     wallet_activity: Option<&'a types::WalletActivity>,
 }
 
-// Escape special characters that might cause issues with HTML/Markdown parsers
-// These characters have special meaning in Telegram/Discord/Slack markdown
+// Sanitize text for messaging platforms that use Markdown/HTML parsing
+// Keep only alphanumeric, spaces, and safe punctuation
 fn escape_special_chars(s: &str) -> String {
-    s.replace('&', "and")
-        .replace('<', "less than")
-        .replace('>', "greater than")
-        .replace('≥', ">=")
-        .replace('≤', "<=")
-        .replace('°', " degrees")
-        .replace('|', "-")
-        .replace('[', "(")
-        .replace(']', ")")
-        .replace('_', " ")
-        .replace('*', "")
-        .replace('`', "'")
-        .replace('~', "")
-        .replace('#', "")
-        .replace('+', "plus")
-        .replace('-', " ")
-        .replace('=', " equals ")
-        .replace('{', "(")
-        .replace('}', ")")
-        .replace('!', "")
-        .replace('.', " ")
+    s.chars()
+        .map(|c| match c {
+            // Keep alphanumeric and basic punctuation
+            'a'..='z' | 'A'..='Z' | '0'..='9' | ' ' | ',' | ':' | '?' => c,
+            // Replace common special chars with safe alternatives
+            '&' => '@',
+            '$' => 'S',
+            '%' => 'p',
+            '≥' | '>' => '>',
+            '≤' | '<' => '<',
+            '°' => 'd',
+            '(' | '[' | '{' => '(',
+            ')' | ']' | '}' => ')',
+            // Remove all other special characters
+            _ => ' ',
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<&str>>()
+        .join(" ")
 }
 
 async fn send_webhook_alert(webhook_url: &str, alert: WebhookAlert<'_>) {
