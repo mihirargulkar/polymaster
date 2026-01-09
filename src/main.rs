@@ -825,25 +825,20 @@ struct WebhookAlert<'a> {
 }
 
 // Sanitize text for messaging platforms that use Markdown/HTML parsing
-// Keep only alphanumeric, spaces, and safe punctuation
+// Remove ALL special characters that could cause parsing issues
 fn escape_special_chars(s: &str) -> String {
     s.chars()
         .map(|c| match c {
-            // Keep alphanumeric and basic punctuation
-            'a'..='z' | 'A'..='Z' | '0'..='9' | ' ' | ',' | ':' | '?' => c,
-            // Replace common special chars with safe alternatives
-            '&' => '@',
-            '$' => 'S',
-            '%' => 'p',
-            '≥' | '>' => '>',
-            '≤' | '<' => '<',
-            '°' => 'd',
+            // Keep only alphanumeric, spaces, and very basic punctuation
+            'a'..='z' | 'A'..='Z' | '0'..='9' | ' ' | ',' | ':' | '?' | '.' => c,
+            // Convert parentheses and brackets to safe versions
             '(' | '[' | '{' => '(',
             ')' | ']' | '}' => ')',
-            // Remove all other special characters
+            // Remove all other characters completely (including $ & % etc)
             _ => ' ',
         })
         .collect::<String>()
+        // Clean up multiple spaces
         .split_whitespace()
         .collect::<Vec<&str>>()
         .join(" ")
