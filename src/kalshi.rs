@@ -118,7 +118,8 @@ pub async fn fetch_market_info(ticker: &str) -> Option<String> {
     None
 }
 
-pub fn parse_ticker_details(ticker: &str) -> String {
+pub fn parse_ticker_details(ticker: &str, side: &str) -> String {
+    let betting_side = side.to_uppercase();
     // Parse Kalshi ticker to extract bet details
     // Format examples:
     // KXNHLGAME-26JAN08ANACAR-CAR = NHL game, Carolina wins
@@ -151,7 +152,8 @@ pub fn parse_ticker_details(ticker: &str) -> String {
                     "Asset"
                 };
 
-                return format!("Betting YES = {} price ≥ ${} at expiry", asset, price);
+                return format!("{} price {} ${} at expiry", asset, 
+                    if betting_side == "YES" { "≥" } else { "<" }, price);
             }
         }
     }
@@ -185,7 +187,8 @@ pub fn parse_ticker_details(ticker: &str) -> String {
                             let away = &team_codes[..3];
                             let home = &team_codes[3..];
                             return format!(
-                                "Betting YES = Total points OVER {} | {} @ {} ({})",
+                                "Total points {} {} | {} @ {} ({})",
+                                if betting_side == "YES" { "OVER" } else { "UNDER" },
                                 threshold,
                                 away.to_uppercase(),
                                 home.to_uppercase(),
@@ -195,7 +198,9 @@ pub fn parse_ticker_details(ticker: &str) -> String {
                     }
                 }
 
-                return format!("Betting YES = Total points OVER {} ({})", threshold, sport);
+                return format!("Total points {} {} ({})", 
+                    if betting_side == "YES" { "OVER" } else { "UNDER" },
+                    threshold, sport);
             }
         }
     }
@@ -234,16 +239,32 @@ pub fn parse_ticker_details(ticker: &str) -> String {
                         "Sports"
                     };
 
-                    return format!(
-                        "Betting YES = {} wins vs {} ({})",
-                        outcome.to_uppercase(),
-                        if outcome.to_uppercase() == away.to_uppercase() {
+                    // Show what they're actually betting will happen
+                    if betting_side == "YES" {
+                        return format!(
+                            "{} wins vs {} ({})",
+                            outcome.to_uppercase(),
+                            if outcome.to_uppercase() == away.to_uppercase() {
+                                home.to_uppercase()
+                            } else {
+                                away.to_uppercase()
+                            },
+                            sport
+                        );
+                    } else {
+                        // Betting NO means betting the OTHER team wins
+                        let other_team = if outcome.to_uppercase() == away.to_uppercase() {
                             home.to_uppercase()
                         } else {
                             away.to_uppercase()
-                        },
-                        sport
-                    );
+                        };
+                        return format!(
+                            "{} wins vs {} ({})",
+                            other_team,
+                            outcome.to_uppercase(),
+                            sport
+                        );
+                    }
                 }
             }
         }
@@ -251,22 +272,32 @@ pub fn parse_ticker_details(ticker: &str) -> String {
     } else if ticker.contains("SPREAD") {
         let parts: Vec<&str> = ticker.split('-').collect();
         if let Some(last_part) = parts.last() {
-            // Could be like "CAR3" meaning Carolina -3
+            // Handle formats: "CAR3", "CAR-3", "CAR_N3" (negative), etc.
             let team = last_part
                 .chars()
                 .take_while(|c| c.is_alphabetic())
                 .collect::<String>();
-            let spread = last_part
+            let spread_str = last_part
                 .chars()
                 .skip_while(|c| c.is_alphabetic())
+                .filter(|c| c.is_numeric() || *c == '.' || *c == '-')
                 .collect::<String>();
 
-            if !team.is_empty() && !spread.is_empty() {
-                return format!(
-                    "Betting YES = {} covers -{} point spread",
-                    team.to_uppercase(),
-                    spread
-                );
+            if !team.is_empty() && !spread_str.is_empty() {
+                let spread_value = spread_str.trim_start_matches('-');
+                if betting_side == "YES" {
+                    return format!(
+                        "{} wins by {} or more (covers)",
+                        team.to_uppercase(),
+                        spread_value
+                    );
+                } else {
+                    return format!(
+                        "{} loses or wins by less than {} (doesn't cover)",
+                        team.to_uppercase(),
+                        spread_value
+                    );
+                }
             }
         }
     // Check for player props (touchdowns, points, etc)
@@ -280,7 +311,8 @@ pub fn parse_ticker_details(ticker: &str) -> String {
                     "points"
                 };
                 return format!(
-                    "Betting YES = Player gets {} or more {}",
+                    "Player gets {} {} {}",
+                    if betting_side == "YES" { "≥" } else { "<" },
                     threshold, prop_type
                 );
             }
@@ -296,7 +328,12 @@ pub fn parse_ticker_details(ticker: &str) -> String {
                     } else {
                         "Low"
                     };
-                    return format!("Betting YES = {} temp ≥ {}°F", metric, temp);
+                    return format!(
+                        "{} temp {} {}°F",
+                        metric,
+                        if betting_side == "YES" { "≥" } else { "<" },
+                        temp
+                    );
                 }
             }
         }
@@ -304,7 +341,54 @@ pub fn parse_ticker_details(ticker: &str) -> String {
         // Presidential/election markets
         let parts: Vec<&str> = ticker.split('-').collect();
         if let Some(outcome) = parts.last() {
-            return format!("Betting YES = {} wins", outcome.to_uppercase());
+            if betting_side == "YES" {
+                return format!("{} wins", outcome.to_uppercase());
+            } else {
+                return format!("{} doesn't win", outcome.to_uppercase());
+            }
+        }
+    }
+
+    // Check for combos/parlays
+    if ticker.contains("COMBO") || ticker.contains("PARLAY") || ticker.contains("MULTI") {
+        let parts: Vec<&str> = ticker.split('-').collect();
+        if let Some(last) = parts.last() {
+            return format!(
+                "{} {} combo/parlay",
+                if betting_side == "YES" { "Wins" } else { "Loses" },
+                last.to_uppercase()
+            );
+        }
+    }
+
+    // Check for first/last to score
+    if ticker.contains("FIRST") || ticker.contains("LAST") || ticker.contains("ANYTIME") {
+        let timing = if ticker.contains("FIRST") {
+            "first"
+        } else if ticker.contains("LAST") {
+            "last"
+        } else {
+            "anytime"
+        };
+        let parts: Vec<&str> = ticker.split('-').collect();
+        if let Some(player) = parts.last() {
+            if betting_side == "YES" {
+                return format!("{} scores {} TD", player.to_uppercase(), timing);
+            } else {
+                return format!("{} doesn't score {} TD", player.to_uppercase(), timing);
+            }
+        }
+    }
+
+    // Check for ranking/placement markets (TOP, FINISH, PLACE)
+    if ticker.contains("TOP") || ticker.contains("FINISH") || ticker.contains("PLACE") {
+        let parts: Vec<&str> = ticker.split('-').collect();
+        if let Some(outcome) = parts.last() {
+            return format!(
+                "{} {}",
+                outcome.to_uppercase(),
+                if betting_side == "YES" { "finishes in position" } else { "doesn't finish in position" }
+            );
         }
     }
 
@@ -312,9 +396,18 @@ pub fn parse_ticker_details(ticker: &str) -> String {
     let parts: Vec<&str> = ticker.split('-').collect();
     if let Some(outcome) = parts.last() {
         if outcome.len() <= 10 && outcome.chars().all(|c| c.is_alphanumeric()) {
-            return format!("Betting YES = {} outcome", outcome.to_uppercase());
+            if betting_side == "YES" {
+                return format!("{} happens", outcome.to_uppercase());
+            } else {
+                return format!("{} doesn't happen", outcome.to_uppercase());
+            }
         }
     }
 
-    String::from("Yes/No market - check ticker for details")
+    // Absolute fallback - show more context
+    if betting_side == "YES" {
+        String::from("YES - check market details")
+    } else {
+        String::from("NO - check market details")
+    }
 }

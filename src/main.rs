@@ -410,8 +410,12 @@ async fn watch_whales(threshold: u64, interval: u64) -> Result<(), Box<dyn std::
                                 trade.market_title = Some(title);
                             }
                             
-                            // Extract outcome from ticker
-                            let outcome = kalshi::parse_ticker_details(&trade.ticker);
+                            // Extract outcome from ticker with the side they're taking
+                            let outcome = kalshi::parse_ticker_details(&trade.ticker, &trade.taker_side);
+                            
+                            // For Kalshi: just show "BUY" as the action
+                            // The outcome already explains what they're betting on
+                            let action = "BUY".to_string();
                             
                             // Note: Kalshi doesn't expose wallet IDs in public API
                             print_kalshi_alert(trade, trade_value, None);
@@ -425,7 +429,7 @@ async fn watch_whales(threshold: u64, interval: u64) -> Result<(), Box<dyn std::
                                             platform: "Kalshi",
                                             market_title: trade.market_title.as_deref(),
                                             outcome: Some(&outcome),
-                                            side: &trade.taker_side,
+                                            side: &action,
                                             value: trade_value,
                                             price: trade.yes_price / 100.0,
                                             size: f64::from(trade.count),
@@ -596,19 +600,70 @@ fn print_whale_alert(
 fn print_kalshi_alert(
     trade: &kalshi::Trade,
     value: f64,
-    _wallet_activity: Option<&types::WalletActivity>,
+    wallet_activity: Option<&types::WalletActivity>,
 ) {
     let is_sell = trade.taker_side.to_lowercase() == "sell";
 
-    // Play alert sound immediately
-    play_alert_sound();
+    // Enhanced alert sound for exits, repeat actors, or heavy actors
+    if is_sell {
+        // Triple beep for exits - they're important!
+        play_alert_sound();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        play_alert_sound();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        play_alert_sound();
+    } else if let Some(activity) = wallet_activity {
+        if activity.is_repeat_actor || activity.is_heavy_actor {
+            // Triple beep for repeat/heavy actors
+            play_alert_sound();
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            play_alert_sound();
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            play_alert_sound();
+        } else {
+            play_alert_sound();
+        }
+    } else {
+        play_alert_sound();
+    }
 
     println!();
 
+    // Enhanced header for exits and repeat actors
     let header = if is_sell {
-        "[ALERT] WHALE EXITING POSITION - Kalshi"
-            .bright_red()
-            .bold()
+        if let Some(activity) = wallet_activity {
+            if activity.is_heavy_actor {
+                "[HIGH PRIORITY] WHALE EXITING POSITION - Kalshi"
+                    .bright_red()
+                    .bold()
+            } else if activity.is_repeat_actor {
+                "[ELEVATED ALERT] WHALE EXITING POSITION - Kalshi"
+                    .bright_red()
+                    .bold()
+            } else {
+                "[ALERT] WHALE EXITING POSITION - Kalshi"
+                    .bright_red()
+                    .bold()
+            }
+        } else {
+            "[ALERT] WHALE EXITING POSITION - Kalshi"
+                .bright_red()
+                .bold()
+        }
+    } else if let Some(activity) = wallet_activity {
+        if activity.is_heavy_actor {
+            "[HIGH PRIORITY ALERT] REPEAT HEAVY ACTOR - Kalshi"
+                .bright_green()
+                .bold()
+        } else if activity.is_repeat_actor {
+            "[ELEVATED ALERT] REPEAT ACTOR - Kalshi"
+                .bright_green()
+                .bold()
+        } else {
+            "[ALERT] LARGE TRANSACTION DETECTED - Kalshi"
+                .bright_green()
+                .bold()
+        }
     } else {
         "[ALERT] LARGE TRANSACTION DETECTED - Kalshi"
             .bright_green()
@@ -624,7 +679,7 @@ fn print_kalshi_alert(
     }
 
     // Parse and display what the bet means
-    let bet_details = kalshi::parse_ticker_details(&trade.ticker);
+    let bet_details = kalshi::parse_ticker_details(&trade.ticker, &trade.taker_side);
     let bet_color = if is_sell {
         bet_details.bright_red().bold()
     } else {
@@ -671,9 +726,36 @@ fn print_kalshi_alert(
     println!();
     println!("{}", format!("Ticker: {}", trade.ticker).dimmed());
 
+    // Display wallet activity if available (note: Kalshi public API doesn't expose wallet IDs)
+    if let Some(activity) = wallet_activity {
+        println!();
+        println!("{}", "[WALLET ACTIVITY]".bright_cyan().bold());
+        println!("Note: Kalshi public API doesn't expose wallet IDs, but patterns suggest:");
+        println!("Txns (1h):  {}", activity.transactions_last_hour);
+        println!("Txns (24h): {}", activity.transactions_last_day);
+        println!("Volume (1h):  ${:.2}", activity.total_value_hour);
+        println!("Volume (24h): ${:.2}", activity.total_value_day);
+
+        if activity.is_heavy_actor {
+            println!(
+                "{}",
+                "Status: HEAVY ACTOR (5+ transactions in 24h)"
+                    .bright_red()
+                    .bold()
+            );
+        } else if activity.is_repeat_actor {
+            println!(
+                "{}",
+                "Status: REPEAT ACTOR (multiple transactions detected)"
+                    .yellow()
+                    .bold()
+            );
+        }
+    }
+
     // Anomaly detection
     let avg_price = (trade.yes_price + trade.no_price) / 2.0;
-    detect_anomalies(avg_price / 100.0, trade.count as f64, value, None);
+    detect_anomalies(avg_price / 100.0, trade.count as f64, value, wallet_activity);
 
     println!("{}", "=".repeat(70).dimmed());
     println!();
