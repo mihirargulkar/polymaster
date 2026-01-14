@@ -1,56 +1,131 @@
 # Quick Start Guide
 
-## ⚠️ DISCLAIMER
+## DISCLAIMER
 
-**This tool is for informational and research purposes only.** I do not condone gambling or speculative trading. Use this data solely for informed decision-making and market analysis. Trade responsibly and within your means.
+This tool is for informational and research purposes only. Use this data solely for informed decision-making and market analysis.
 
 ---
 
-Get started with Whale Watcher in under 2 minutes.
-
-## Installation & Usage
+## Installation
 
 ```bash
-# Build and install
-cargo install --path .
+# Install Rust (if not already installed)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source $HOME/.cargo/env
 
-# Start monitoring (no setup required)
+# Clone and build
+git clone https://github.com/neur0map/polymaster.git
+cd polymaster
+cargo build --release
+cargo install --path .
+```
+
+## Basic Usage
+
+```bash
+# Start monitoring with default settings ($25k threshold, 5 second polling)
 wwatcher watch
 
-# Customize threshold or interval
-wwatcher watch -t 50000 -i 10
+# Customize threshold and polling interval
+wwatcher watch --threshold 50000 --interval 30
 ```
 
-### What it does:
-- Monitors Polymarket & Kalshi for transactions over $25k (default)
-- Alerts with audio notification when whales are detected
-- Tracks wallet activity and repeat actors
-- Identifies unusual trading patterns automatically
-- No API keys required (uses public endpoints)
+## Running as a System Service (Linux)
 
-### Optional: Authenticated Access
+To run the watcher continuously as a background service:
+
+### Step 1: Configure webhook (optional)
 
 ```bash
-wwatcher setup  # Configure Kalshi credentials for higher rate limits
+mkdir -p ~/.config/wwatcher
+cat > ~/.config/wwatcher/config.json << 'EOF'
+{
+  "webhook_url": "https://your-webhook-url.com/webhook/polymaster"
+}
+EOF
 ```
 
-## API Key Information
+### Step 2: Create systemd service file
 
-### Polymarket
-- **No API key needed**
-- Uses public data endpoint: `https://data-api.polymarket.com`
-- Works out of the box
+```bash
+sudo tee /etc/systemd/system/wwatcher.service > /dev/null << EOF
+[Unit]
+Description=Polymaster Whale Watcher
+After=network-online.target
+Wants=network-online.target
 
-### Kalshi
-- **Public endpoint available** (no auth needed)
-- **Optional auth**: For higher rate limits
-  - Create account: https://kalshi.com
-  - Generate keys: https://kalshi.com/profile/api-keys
-  - Add via: `./target/release/wwatcher setup`
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$HOME
+ExecStart=$HOME/.cargo/bin/wwatcher watch --threshold 28000 --interval 5
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
 
-## Example Output
+[Install]
+WantedBy=multi-user.target
+EOF
+```
 
-When a whale is detected:
+### Step 3: Start and enable service
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable wwatcher.service
+sudo systemctl start wwatcher.service
+```
+
+### Service Management Commands
+
+```bash
+# Check service status
+sudo systemctl status wwatcher.service
+
+# View live logs
+sudo journalctl -u wwatcher.service -f
+
+# Restart service
+sudo systemctl restart wwatcher.service
+
+# Stop service
+sudo systemctl stop wwatcher.service
+```
+
+### Quick Update and Restart
+
+```bash
+cd ~/polymaster && git pull && cargo build --release && cargo install --path . && sudo systemctl restart wwatcher.service
+```
+
+## What It Monitors
+
+- Polymarket and Kalshi transactions over your threshold (default $25k)
+- Wallet activity and repeat actors
+- Unusual trading patterns and anomalies
+- Entry and exit positions
+
+## Optional: Configure Kalshi API
+
+For higher rate limits, add Kalshi credentials:
+
+```bash
+wwatcher setup
+```
+
+## Webhook Integration
+
+Send alerts to automation platforms:
+
+- n8n (self-hosted)
+- Zapier
+- Make (Integromat)
+- Any webhook endpoint
+
+Payload includes: platform, alert_type (WHALE_ENTRY/WHALE_EXIT), action (BUY/SELL), value, price, market details, and wallet activity.
+
+## Example Alert Output
 
 ```
 [ALERT] LARGE TRANSACTION DETECTED - Polymarket
@@ -70,29 +145,29 @@ Asset ID: 65396714035221124737...
 ======================================================================
 ```
 
-## Pro Tips
-
-1. **Lower thresholds** for more alerts: `-t 10000`
-2. **Slower polling** to reduce API calls: `-i 30`
-3. **Install system-wide**: `cargo install --path .`
-4. **Run in background**: `nohup wwatcher watch > whales.log 2>&1 &`
-5. **Anomaly detection**: Automatically identifies unusual trading patterns
-
 ## Troubleshooting
 
-**Q: I get rate limit errors**  
-A: Increase the interval: `wwatcher watch -i 60`
+### Rate limit errors
+Increase polling interval:
+```bash
+wwatcher watch --interval 60
+```
 
-**Q: No whales detected**  
-A: Markets might be quiet. Try lowering threshold: `-t 10000`
+### No transactions detected
+Lower the threshold:
+```bash
+wwatcher watch --threshold 10000
+```
 
-**Q: API errors**  
-A: Both APIs are public and should work. Check your internet connection.
+### Service not starting
+Check logs:
+```bash
+sudo journalctl -u wwatcher.service -n 50
+```
 
-## Next Steps
-
-- Read the full [README.md](README.md) for detailed documentation
-- Explore command options: `wwatcher watch --help`
-- Check configuration: `wwatcher status`
-
-Happy whale watching!
+### Update service configuration
+Edit threshold or interval in service file, then reload:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart wwatcher.service
+```

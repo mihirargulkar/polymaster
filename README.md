@@ -2,35 +2,33 @@
 
 A Rust CLI tool that monitors large transactions on Polymarket and Kalshi prediction markets. Real-time alerts for significant market activity with built-in anomaly detection.
 
-**Repository**: https://github.com/neur0map/polymaster
+Repository: https://github.com/neur0map/polymaster
 
-## ⚠️ DISCLAIMER
+## DISCLAIMER
 
-**This tool is for informational and research purposes only.**
-
-I do not condone gambling or speculative trading. Use this data solely for informed decision-making and market analysis. Trade responsibly and within your means.
+This tool is for informational and research purposes only. Use this data solely for informed decision-making and market analysis.
 
 ## Features
 
-- **Real-time monitoring** of Polymarket and Kalshi transactions
-- **Audio alerts** - instant beep notification (triple beep for repeat actors)
-- **Wallet tracking** - detects repeated large transactions from same wallet
+- Real-time monitoring of Polymarket and Kalshi transactions
+- Audio alerts with triple beep for repeat actors
+- Wallet tracking detects repeated large transactions from same wallet
   - Elevated alerts for repeat actors (2+ txns in 1 hour)
   - High priority alerts for heavy actors (5+ txns in 24 hours)
   - Tracks volume and transaction frequency per wallet
-- **Customizable alerts** for transactions above a threshold (default: $25,000)
-- **Anomaly detection** - identifies unusual trading patterns including:
-  - Extreme confidence bets (>95% or <5% probability)
+- Customizable alerts for transactions above a threshold (default $25,000)
+- Anomaly detection identifies unusual trading patterns:
+  - Extreme confidence bets (over 95% or under 5% probability)
   - Contrarian positions on unlikely outcomes
-  - Exceptionally large position sizes (>100k contracts)
-  - Major capital deployment (>$100k)
+  - Exceptionally large position sizes (over 100k contracts)
+  - Major capital deployment (over $100k)
   - Possible information asymmetry indicators
-- **Webhook notifications** - send alerts to n8n, Zapier, Make, or any webhook endpoint
-- **Exit detection** - special alerts when whales are selling/exiting positions
-- **Persistent configuration** - set up once, no need for exports
-- **Professional CLI output** with clear formatting
-- **No API keys required** for basic functionality (public data access)
-- **Fast and efficient** - built with Rust
+- Webhook notifications send alerts to n8n, Zapier, Make, or any webhook endpoint
+- Exit detection with special alerts when whales are selling or exiting positions
+- Persistent configuration saves settings between runs
+- Clean CLI output with clear formatting
+- No API keys required for basic functionality (public data access)
+- Fast and efficient, built with Rust
 
 ## Installation
 
@@ -73,11 +71,13 @@ wwatcher setup  # Configure optional API credentials and webhook
 wwatcher status # View current configuration
 ```
 
-**Webhook Integration:**
+### Webhook Integration
+
 During setup, you can configure a webhook URL to receive alerts. This works with:
-- **n8n** - Self-hosted automation platform
-- **Zapier** - Cloud automation service
-- **Make** (formerly Integromat) - Automation platform
+
+- n8n (self-hosted automation platform)
+- Zapier (cloud automation service)
+- Make, formerly Integromat (automation platform)
 - Any service that accepts HTTP POST requests with JSON payloads
 
 Webhook payload example:
@@ -108,25 +108,27 @@ Webhook payload example:
 
 ### Polymarket
 
-- **Public API**: `https://data-api.polymarket.com`
-- **No authentication required** for public trade data
-- **Documentation**: https://docs.polymarket.com
+Public API: https://data-api.polymarket.com
 
-The tool uses the Polymarket Data API to fetch recent trades. This is a public endpoint that provides:
+No authentication required for public trade data. The tool uses the Polymarket Data API to fetch:
+
 - Recent trade activity
 - Market data
 - Price information
 
+Documentation: https://docs.polymarket.com
+
 ### Kalshi
 
-- **Public API**: `https://api.elections.kalshi.com/trade-api/v2`
-- **Authentication**: Optional (public endpoints available)
-- **Documentation**: https://docs.kalshi.com
+Public API: https://api.elections.kalshi.com/trade-api/v2
 
-For public trade data, no API key is needed. If you want access to your personal orders and fills, you can:
+Authentication is optional. Public endpoints are available without an API key. For access to personal orders and fills:
+
 1. Create an account at https://kalshi.com
 2. Generate API credentials at https://kalshi.com/profile/api-keys
 3. Run `wwatcher setup` and enter your credentials
+
+Documentation: https://docs.kalshi.com
 
 ## Alert Example
 
@@ -152,15 +154,16 @@ Asset ID: 65396714035221124737...
 
 ## Command Reference
 
-### `wwatcher watch`
+### wwatcher watch
 
 Start monitoring for large transactions.
 
-**Options:**
+Options:
+
 - `-t, --threshold <AMOUNT>` - Minimum transaction size in USD (default: 25000)
 - `-i, --interval <SECONDS>` - Polling interval in seconds (default: 5)
 
-**Examples:**
+Examples:
 ```bash
 wwatcher watch                        # Default: $25k threshold, 5s interval
 wwatcher watch -t 50000               # $50k threshold
@@ -168,7 +171,7 @@ wwatcher watch -i 30                  # Check every 30 seconds
 wwatcher watch -t 100000 -i 60        # $100k threshold, check every minute
 ```
 
-### `wwatcher setup`
+### wwatcher setup
 
 Interactive setup wizard to configure API credentials.
 
@@ -176,7 +179,7 @@ Interactive setup wizard to configure API credentials.
 wwatcher setup
 ```
 
-### `wwatcher status`
+### wwatcher status
 
 Show current configuration status.
 
@@ -187,10 +190,12 @@ wwatcher status
 ## Configuration File
 
 Configuration is stored at:
-- **macOS/Linux**: `~/.config/wwatcher/config.json`
-- **Windows**: `%APPDATA%\wwatcher\config.json`
 
-Example `config.json`:
+- macOS/Linux: `~/.config/wwatcher/config.json`
+- Windows: `%APPDATA%\wwatcher\config.json`
+
+Example config.json:
+
 ```json
 {
   "kalshi_api_key_id": "your-key-id",
@@ -202,31 +207,32 @@ Example `config.json`:
 ## Development
 
 Built with:
-- [Rust](https://www.rust-lang.org/) - Systems programming language
-- [Tokio](https://tokio.rs/) - Async runtime
-- [Reqwest](https://github.com/seanmonstar/reqwest) - HTTP client
-- [Clap](https://github.com/clap-rs/clap) - CLI argument parsing
-- [Serde](https://serde.rs/) - JSON serialization
+
+- Rust - Systems programming language
+- Tokio - Async runtime
+- Reqwest - HTTP client
+- Clap - CLI argument parsing
+- Serde - JSON serialization
 
 ## Troubleshooting
 
-### "No configuration found" warning
+### No configuration found warning
 
-This is normal! The tool works without configuration using public APIs. Run `wwatcher setup` only if you want to add Kalshi authentication.
+This is normal. The tool works without configuration using public APIs. Run `wwatcher setup` only if you want to add Kalshi authentication.
 
 ### API errors
 
-- **Polymarket**: Public endpoint, should work without issues
-- **Kalshi**: Public endpoint works without auth, but rate limits may apply
+- Polymarket: Public endpoint should work without issues
+- Kalshi: Public endpoint works without auth, but rate limits may apply
 
 ### Rate Limiting
 
 If you're getting rate limited:
+
 - Increase the `--interval` to poll less frequently
 - For Kalshi: Add API credentials via `wwatcher setup`
 
-
 ## License
 
-This tool is for educational and monitoring purposes. Please review the terms of service for Polymarket and Kalshi APIs.
+This tool is for educational and monitoring purposes. Review the terms of service for Polymarket and Kalshi APIs.
 
