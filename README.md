@@ -256,6 +256,12 @@ If you're getting rate limited:
 - Increase the `--interval` to poll less frequently
 - For Kalshi: Add API credentials via `wwatcher setup`
 
+## Contributors
+
+Thanks to these contributors for their ideas and improvements:
+
+- [@fuzmik](https://github.com/fuzmik) - Suggested alert history logging feature
+
 ## License
 
 This tool is for educational and monitoring purposes. Review the terms of service for Polymarket and Kalshi APIs.
