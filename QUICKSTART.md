@@ -376,6 +376,181 @@ app.post('/webhook/whale-alerts', async (req, res) => {
 app.listen(3000);
 ```
 
+#### n8n Workflow
+
+n8n is a self-hosted workflow automation platform. Use the Webhook node to receive alerts and process them.
+
+**Step 1**: Create a new workflow in n8n
+
+**Step 2**: Add a Webhook node
+- Set "HTTP Method" to POST
+- Set "Path" to something like `whale-alerts`
+- Copy the webhook URL (e.g., `https://your-n8n-instance.com/webhook/whale-alerts`)
+
+**Step 3**: Configure polymaster with the webhook URL
+```bash
+wwatcher setup
+# Enter: https://your-n8n-instance.com/webhook/whale-alerts
+```
+
+**Step 4**: Add processing nodes to your workflow
+
+Example n8n workflow structure:
+
+```
+Webhook (Receive alert)
+  |
+  v
+Function (Process data)
+  |
+  +---> [IF: is_heavy_actor = true]
+  |       |
+  |       v
+  |     Send urgent notification (Telegram/Discord/Email)
+  |
+  +---> [IF: value > 100000]
+  |       |
+  |       v
+  |     Log to database (PostgreSQL/MongoDB)
+  |
+  +---> Always: Send to Slack/Discord
+```
+
+**Function Node Example** (to format the message):
+
+```javascript
+const alert = $input.item.json;
+
+const message = `
+WHALE ALERT: ${alert.alert_type}
+Platform: ${alert.platform}
+Market: ${alert.market_title}
+Action: ${alert.action} ${alert.outcome}
+Value: $${alert.value.toLocaleString()}
+Price: ${(alert.price * 100).toFixed(1)}%
+${alert.wallet_activity.is_heavy_actor ? '⚠️ HEAVY ACTOR DETECTED' : ''}
+`;
+
+return {
+  json: {
+    message: message,
+    alert: alert,
+    priority: alert.wallet_activity.is_heavy_actor ? 'urgent' : 'normal',
+    value_usd: alert.value
+  }
+};
+```
+
+**Conditional Routing** (IF node):
+- Condition 1: `{{$json.alert.wallet_activity.is_heavy_actor}} === true`
+- Condition 2: `{{$json.alert.value}} > 100000`
+
+**Common n8n integrations**:
+- Telegram node: Send alerts to Telegram channel
+- Discord node: Post to Discord server
+- Email node: Send email notifications
+- PostgreSQL/MongoDB node: Store alerts in database
+- HTTP Request node: Forward to other services
+- Code node: Custom processing logic
+
+#### ntfy Integration
+
+ntfy is a simple pub/sub notification service. Forward alerts to ntfy topics for mobile/desktop notifications.
+
+**Direct Integration** (requires middleware):
+
+Create a simple Node.js bridge to convert webhook to ntfy format:
+
+```javascript
+const express = require('express');
+const axios = require('axios');
+const app = express();
+app.use(express.json());
+
+const NTFY_TOPIC = 'your-whale-alerts-topic';
+const NTFY_SERVER = 'https://ntfy.sh'; // or your self-hosted server
+
+app.post('/webhook/whale-alerts', async (req, res) => {
+  const alert = req.body;
+
+  // Format priority based on conditions
+  let priority = 'default';
+  if (alert.wallet_activity.is_heavy_actor) {
+    priority = 'urgent';
+  } else if (alert.value > 100000) {
+    priority = 'high';
+  }
+
+  // Determine tags
+  const tags = [alert.platform.toLowerCase()];
+  if (alert.action === 'BUY') tags.push('chart_with_upwards_trend');
+  if (alert.action === 'SELL') tags.push('chart_with_downwards_trend');
+  if (alert.wallet_activity.is_heavy_actor) tags.push('warning');
+
+  // Create title and message
+  const title = `${alert.alert_type} - ${alert.platform}`;
+  const message = `${alert.action} ${alert.outcome}
+Market: ${alert.market_title}
+Value: $${alert.value.toLocaleString()}
+Price: ${(alert.price * 100).toFixed(1)}%
+${alert.wallet_activity.is_heavy_actor ? '\n⚠️ Heavy Actor: 5+ txns in 24h' : ''}`;
+
+  // Send to ntfy
+  await axios.post(`${NTFY_SERVER}/${NTFY_TOPIC}`, message, {
+    headers: {
+      'Title': title,
+      'Priority': priority,
+      'Tags': tags.join(','),
+      'Actions': `view, Open Market, https://polymarket.com, clear=true`
+    }
+  });
+
+  res.sendStatus(200);
+});
+
+app.listen(3000, () => {
+  console.log('ntfy bridge running on port 3000');
+  console.log(`Subscribe: ${NTFY_SERVER}/${NTFY_TOPIC}`);
+});
+```
+
+**Usage**:
+
+1. Run the bridge server:
+```bash
+node ntfy-bridge.js
+```
+
+2. Configure polymaster to send to the bridge:
+```bash
+wwatcher setup
+# Enter: http://localhost:3000/webhook/whale-alerts
+```
+
+3. Subscribe to notifications:
+```bash
+# Mobile app: Subscribe to "your-whale-alerts-topic"
+# Desktop: ntfy subscribe your-whale-alerts-topic
+# Web: https://ntfy.sh/your-whale-alerts-topic
+```
+
+**n8n + ntfy Workflow**:
+
+You can also use n8n to forward alerts to ntfy:
+
+1. Webhook node receives alert from polymaster
+2. Function node formats the message
+3. HTTP Request node posts to ntfy
+
+HTTP Request node configuration:
+- Method: POST
+- URL: `https://ntfy.sh/your-whale-alerts-topic`
+- Headers:
+  - `Title`: `{{$json.alert.alert_type}} - {{$json.alert.platform}}`
+  - `Priority`: `{{$json.priority}}`
+  - `Tags`: `whale,{{$json.alert.platform}}`
+- Body: `{{$json.message}}`
+
 ## Example Alert Output
 
 ```
