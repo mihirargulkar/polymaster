@@ -1,6 +1,9 @@
-# wwatcher MCP Integration
+# wwatcher-ai Integration
 
-MCP (Model Context Protocol) server that exposes wwatcher whale alert data to AI agents. Includes RapidAPI integration for pulling contextual market data (crypto prices, sports odds, weather forecasts, news).
+AI agent integration for wwatcher whale alert monitoring. Includes:
+- **CLI tool** for OpenClaw and shell-based agents
+- **MCP server** for Claude Code and MCP-compatible clients
+- **RapidAPI integration** for contextual market data (crypto, sports, weather, news)
 
 ## Quick Start
 
@@ -16,9 +19,71 @@ npm run build
 2. Add your RapidAPI key: `RAPIDAPI_KEY=your-key`
 3. Get your key at https://rapidapi.com
 
-## MCP Server Setup
+Subscribe to these APIs:
+- [Open Weather](https://rapidapi.com/worldapi/api/open-weather13)
+- [CoinMarketCap](https://rapidapi.com/coinmarketcap/api/coinmarketcap-api1)
+- [The Odds API](https://rapidapi.com/therundown/api/therundown-therundown-v1)
+- [Newscatcher](https://rapidapi.com/newscatcher-api-newscatcher-api-default/api/newscatcher)
 
-Add to your MCP client config (e.g., `~/.openclaw/openclaw.json`):
+---
+
+## Option 1: CLI (OpenClaw / Shell)
+
+For OpenClaw agents or any shell-based automation.
+
+### Commands
+
+```bash
+# Health check
+node dist/cli.js status
+
+# Query alerts
+node dist/cli.js alerts --limit=10 --min=50000
+node dist/cli.js alerts --platform=polymarket --type=WHALE_ENTRY
+
+# Aggregate stats
+node dist/cli.js summary
+
+# Search alerts
+node dist/cli.js search "bitcoin"
+
+# Fetch market data from RapidAPI
+node dist/cli.js fetch "Bitcoin price above 100k"
+node dist/cli.js fetch "Lakers vs Celtics" --category=sports
+```
+
+### CLI Options
+
+**alerts:**
+| Option | Description |
+|--------|-------------|
+| `--limit=N` | Max alerts to return (default: 20) |
+| `--platform=X` | Filter: polymarket, kalshi |
+| `--type=X` | Filter: WHALE_ENTRY, WHALE_EXIT |
+| `--min=N` | Minimum USD value |
+| `--since=ISO` | Alerts after timestamp |
+
+**fetch:**
+| Option | Description |
+|--------|-------------|
+| `--category=X` | Override: weather, crypto, sports, news |
+
+### OpenClaw Skill Installation
+
+```bash
+mkdir -p ~/.openclaw/skills/wwatcher-ai
+cp skill/SKILL.md ~/.openclaw/skills/wwatcher-ai/SKILL.md
+```
+
+---
+
+## Option 2: MCP Server (Claude Code)
+
+For MCP-compatible clients like Claude Code.
+
+### Setup
+
+Add to your MCP client config:
 
 ```json
 {
@@ -34,20 +99,30 @@ Add to your MCP client config (e.g., `~/.openclaw/openclaw.json`):
 }
 ```
 
-## Tools
+### Start MCP Server
+
+```bash
+npm run start:mcp
+# or
+node dist/index.js
+```
+
+### MCP Tools
 
 | Tool | Description |
 |------|-------------|
-| `get_recent_alerts` | Query alert history with filters (limit, platform, alert_type, min_value, since) |
-| `get_alert_summary` | Aggregate stats: total volume, breakdown by platform/market/action, top markets |
-| `search_alerts` | Text search in market titles and outcomes |
-| `fetch_market_data` | Pull contextual data from RapidAPI providers based on market title keywords |
-| `get_wwatcher_status` | Health check: history file, alert count, provider status |
+| `get_recent_alerts` | Query alert history with filters |
+| `get_alert_summary` | Aggregate stats: volume, top markets, whale counts |
+| `search_alerts` | Text search in market titles/outcomes |
+| `fetch_market_data` | Pull RapidAPI data based on market keywords |
+| `get_wwatcher_status` | Health check |
 
-## Modes
+### Modes
 
-- `--mode=realtime` (default) — watches alert_history.jsonl for new alerts in real-time
-- `--mode=snapshot` — loads existing history only, no live watching
+- `--mode=realtime` (default) — watches for new alerts in real-time
+- `--mode=snapshot` — loads existing history only
+
+---
 
 ## Providers
 
@@ -60,6 +135,34 @@ Data providers are configured in `providers.json`. Add new providers by editing 
 | The Odds API | sports | Game odds |
 | Newscatcher | news | Article search |
 
+### Adding a Provider
+
+```json
+{
+  "your_provider": {
+    "name": "Provider Name",
+    "category": "category",
+    "rapidapi_host": "api-host.p.rapidapi.com",
+    "env_key": "RAPIDAPI_KEY",
+    "keywords": ["keyword1", "keyword2"],
+    "endpoints": {
+      "main": {
+        "method": "GET",
+        "path": "/v1/endpoint",
+        "description": "What it does",
+        "params": {}
+      }
+    }
+  }
+}
+```
+
+---
+
 ## For AI Agents
 
-See [`instructions_for_ai_agent.md`](../instructions_for_ai_agent.md) in the repository root for complete agent instructions.
+See [`instructions_for_ai_agent.md`](../instructions_for_ai_agent.md) for complete agent instructions including:
+- Research workflows
+- Analysis output format
+- Category-specific guidance
+- Pattern detection

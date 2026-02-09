@@ -160,7 +160,70 @@ Thanks to these contributors for their ideas and improvements:
 
 ## AI Agent Integration
 
-If you are an AI agent (OpenClaw, Claude, etc.), read [`instructions_for_ai_agent.md`](./instructions_for_ai_agent.md) for complete setup and usage instructions.
+wwatcher includes an AI integration layer that turns whale alerts into actionable research.
+
+### For OpenClaw Agents
+
+```bash
+# Build the CLI
+cd integration
+npm install
+npm run build
+
+# Install the skill
+mkdir -p ~/.openclaw/skills/wwatcher-ai
+cp skill/SKILL.md ~/.openclaw/skills/wwatcher-ai/SKILL.md
+```
+
+CLI commands:
+```bash
+cd integration
+node dist/cli.js status                           # Health check
+node dist/cli.js alerts --limit=10 --min=50000    # Query alerts
+node dist/cli.js summary                          # Aggregate stats
+node dist/cli.js search "bitcoin"                 # Search alerts
+node dist/cli.js fetch "BTC price above 100k"    # Get market data
+```
+
+### For MCP Clients (Claude Code)
+
+```bash
+cd integration
+npm install
+npm run build
+npm run start:mcp
+```
+
+Add to your MCP config:
+```json
+{
+  "mcpServers": {
+    "wwatcher": {
+      "command": "node",
+      "args": ["/path/to/integration/dist/index.js"]
+    }
+  }
+}
+```
+
+### RapidAPI Setup
+
+Get contextual market data by subscribing to these RapidAPI services:
+- [Open Weather](https://rapidapi.com/worldapi/api/open-weather13) — forecasts
+- [CoinMarketCap](https://rapidapi.com/coinmarketcap/api/coinmarketcap-api1) — crypto prices
+- [The Odds API](https://rapidapi.com/therundown/api/therundown-therundown-v1) — sports odds
+- [Newscatcher](https://rapidapi.com/newscatcher-api-newscatcher-api-default/api/newscatcher) — news
+
+Add your key to `integration/.env`:
+```
+RAPIDAPI_KEY=your-key-here
+```
+
+### Full Documentation
+
+- [`instructions_for_ai_agent.md`](./instructions_for_ai_agent.md) — Complete agent instructions
+- [`integration/README.md`](./integration/README.md) — CLI and MCP server details
+- [`integration/skill/SKILL.md`](./integration/skill/SKILL.md) — OpenClaw skill reference
 
 ## License
 
