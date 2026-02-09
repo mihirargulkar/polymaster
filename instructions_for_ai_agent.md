@@ -1,6 +1,6 @@
-# Instructions for AI Agent
+# Instructions for AI Agent (OpenClaw)
 
-> This file is the master entry point for any AI agent (OpenClaw, Claude, etc.) working with the wwatcher project.
+> This file is the master entry point for OpenClaw agents working with the wwatcher project.
 
 ## 1. What This Project Is
 
@@ -35,18 +35,11 @@ Alerts are logged to `~/.config/wwatcher/alert_history.jsonl` in JSONL format. E
 }
 ```
 
-Market categories detected by wwatcher (from Kalshi ticker parsing):
-- **Crypto/Stocks**: BTC, ETH, SOL, SPX, TSLA price thresholds
-- **Sports**: NFL, NBA, NHL, MLB, Soccer game outcomes, totals, spreads, player props
-- **Weather**: High/low temperature thresholds for cities
-- **Political**: Presidential, election markets
-- **General**: Any other prediction market
-
 ## 2. Your Role as AI Agent
 
 You are an autonomous research and analysis agent. When whale alerts fire, you:
 
-1. **Monitor alerts** in real-time via the MCP server tools
+1. **Monitor alerts** by periodically running the CLI to check for new entries
 2. **Pull contextual data** from RapidAPI providers (crypto prices, sports odds, weather, news)
 3. **Perform actual research and estimation** — don't just return raw data
 4. **Produce analysis** comparing the whale's position with external data
@@ -55,186 +48,129 @@ You are an autonomous research and analysis agent. When whale alerts fire, you:
 
 A sports alert fires: "Whale bought $50K YES on NBA game Lakers vs Celtics"
 
-1. Call `get_recent_alerts` to see the full alert details
-2. Call `fetch_market_data` with the market title → gets current odds from The Odds API
+1. Run `wwatcher-ai alerts --limit=5` to see the full alert details
+2. Run `wwatcher-ai fetch "Lakers vs Celtics" --category=sports` → gets current odds
 3. Research: odds show Lakers +3.5, whale bet YES on Lakers win at 42% implied probability
-4. Pull injury reports, recent form, head-to-head record
+4. Pull injury reports, recent form, head-to-head record (via news or your knowledge)
 5. Present analysis:
    - "Whale is betting against the spread consensus. Lakers are underdogs at +3.5"
    - "Key factor: LeBron returned from injury 2 games ago, averaging 28pts since return"
    - "Estimation: 45-50% win probability for Lakers, market at 42% — whale may see slight edge"
    - "Confidence: Medium — the edge is thin but whale is a repeat actor with 7 txns today"
 
-## 3. Setup Instructions
+## 3. Setup Instructions (OpenClaw)
 
-Follow these steps to set up the MCP integration:
-
-### Step 1: Build the MCP Server
+### Step 1: Build the CLI
 
 ```bash
-cd integration
+cd /home/neur0map/polymaster-test/integration
 npm install
 npm run build
 ```
 
 ### Step 2: Configure Environment
 
-Copy the example env file and add your RapidAPI key:
-
-```bash
-cp integration/.env.example integration/.env
-```
-
-Edit `integration/.env`:
+Edit `/home/neur0map/polymaster-test/integration/.env`:
 ```
 RAPIDAPI_KEY=your-rapidapi-key-here
 ```
 
-Tell the user: "Go to https://rapidapi.com, create an account, subscribe to the APIs you want (Open Weather, CoinMarketCap, The Odds API, Newscatcher), then copy your API key and paste it into `integration/.env`"
+Get your key at https://rapidapi.com. Subscribe to:
+- Open Weather: https://rapidapi.com/worldapi/api/open-weather13
+- CoinMarketCap: https://rapidapi.com/coinmarketcap/api/coinmarketcap-api1
+- The Odds API: https://rapidapi.com/therundown/api/therundown-therundown-v1
+- Newscatcher: https://rapidapi.com/newscatcher-api-newscatcher-api-default/api/newscatcher
 
-### Step 3: Configure MCP Server
-
-Add this to `~/.openclaw/openclaw.json` (or the relevant MCP client config):
-
-```json
-{
-  "mcpServers": {
-    "wwatcher": {
-      "command": "node",
-      "args": ["/path/to/polymaster/integration/dist/index.js"],
-      "env": {
-        "RAPIDAPI_KEY": "your-rapidapi-key"
-      }
-    }
-  }
-}
-```
-
-Replace `/path/to/polymaster` with the actual path to the cloned repository.
-
-### Step 4: Install Skill (OpenClaw)
+### Step 3: Install Skill
 
 ```bash
 mkdir -p ~/.openclaw/skills/wwatcher-ai
-cp integration/skill/SKILL.md ~/.openclaw/skills/wwatcher-ai/SKILL.md
+cp /home/neur0map/polymaster-test/integration/skill/SKILL.md ~/.openclaw/skills/wwatcher-ai/SKILL.md
 ```
 
-### Step 5: Verify
+### Step 4: Verify
 
-Call the `get_wwatcher_status` tool. You should see:
+```bash
+cd /home/neur0map/polymaster-test/integration && node dist/cli.js status
+```
+
+You should see:
 - `status: "running"`
 - `history_file.exists: true` (if wwatcher has been run before)
 - `providers.count: 4` (weather, crypto, sports, news)
 - `api_key_configured: true` (if RAPIDAPI_KEY is set)
 
-## 4. File Locations for Sensitive Keys
+## 4. CLI Commands
 
-| Key | File | Format |
-|-----|------|--------|
-| RapidAPI key | `integration/.env` | `RAPIDAPI_KEY=abc123` |
-| Kalshi API | `~/.config/wwatcher/config.json` | JSON: `kalshi_api_key_id`, `kalshi_private_key` |
-| OpenClaw env | `~/.openclaw/.env` | `RAPIDAPI_KEY=abc123` |
-| MCP server env | `~/.openclaw/openclaw.json` | JSON: `mcpServers.wwatcher.env` |
-
-**Never commit API keys.** The `integration/.env` file is gitignored.
-
-## 5. How to Use RapidAPI Providers
-
-The file `integration/providers.json` defines all available data sources. Each provider has:
-
-- **rapidapi_host** — the RapidAPI host header
-- **endpoints** — API endpoints with path, method, and parameter definitions
-- **keywords** — terms used to auto-match market titles to providers
-
-### Available Providers
-
-| Provider | Category | What It Provides |
-|----------|----------|-----------------|
-| Open Weather | weather | 5-day forecasts by lat/lon |
-| CoinMarketCap | crypto | Latest cryptocurrency price quotes |
-| The Odds API | sports | Current odds for upcoming games |
-| Newscatcher | news | News article search (matches all alerts) |
-
-### Using the `fetch_market_data` Tool
-
-```
-fetch_market_data({ market_title: "Bitcoin price above $100k" })
-→ Auto-matches "crypto" provider → calls CoinMarketCap latest_quotes with symbol=BTC
-
-fetch_market_data({ market_title: "Lakers vs Celtics", category: "sports" })
-→ Matches "sports" provider → calls The Odds API with sport=basketball_nba
-
-fetch_market_data({ market_title: "NYC high temp above 63°F" })
-→ Auto-matches "weather" provider → calls Open Weather forecast
-```
-
-### Direct API Calls (curl examples)
-
-**Crypto:**
+### `status` — Health Check
 ```bash
-curl -H "X-RapidAPI-Key: YOUR_KEY" -H "X-RapidAPI-Host: coinmarketcap-api1.p.rapidapi.com" \
-  "https://coinmarketcap-api1.p.rapidapi.com/v1/cryptocurrency/quotes/latest?symbol=BTC"
+cd /home/neur0map/polymaster-test/integration && node dist/cli.js status
 ```
 
-**Sports:**
+### `alerts` — Query Alerts
 ```bash
-curl -H "X-RapidAPI-Key: YOUR_KEY" -H "X-RapidAPI-Host: therundown-therundown-v1.p.rapidapi.com" \
-  "https://therundown-therundown-v1.p.rapidapi.com/sports/basketball_nba/odds"
+cd /home/neur0map/polymaster-test/integration && node dist/cli.js alerts --limit=10 --min=50000
+cd /home/neur0map/polymaster-test/integration && node dist/cli.js alerts --platform=polymarket --type=WHALE_ENTRY
 ```
 
-**Weather:**
+Options:
+- `--limit=N` — Max alerts (default: 20)
+- `--platform=X` — polymarket or kalshi
+- `--type=X` — WHALE_ENTRY or WHALE_EXIT
+- `--min=N` — Min USD value
+- `--since=ISO` — Alerts after timestamp
+
+### `summary` — Aggregate Stats
 ```bash
-curl -H "X-RapidAPI-Key: YOUR_KEY" -H "X-RapidAPI-Host: open-weather13.p.rapidapi.com" \
-  "https://open-weather13.p.rapidapi.com/city/fivedaysforcast/40.7128/-74.0060/EN"
+cd /home/neur0map/polymaster-test/integration && node dist/cli.js summary
 ```
 
-**News:**
+### `search` — Text Search
 ```bash
-curl -H "X-RapidAPI-Key: YOUR_KEY" -H "X-RapidAPI-Host: newscatcher.p.rapidapi.com" \
-  "https://newscatcher.p.rapidapi.com/v2/search?q=bitcoin&lang=en"
+cd /home/neur0map/polymaster-test/integration && node dist/cli.js search "bitcoin"
 ```
+
+### `fetch` — Get Market Data
+```bash
+cd /home/neur0map/polymaster-test/integration && node dist/cli.js fetch "Bitcoin price above 100k"
+cd /home/neur0map/polymaster-test/integration && node dist/cli.js fetch "Lakers vs Celtics" --category=sports
+```
+
+## 5. File Locations
+
+| Item | Path |
+|------|------|
+| Alert history | `~/.config/wwatcher/alert_history.jsonl` |
+| RapidAPI key | `/home/neur0map/polymaster-test/integration/.env` |
+| Providers config | `/home/neur0map/polymaster-test/integration/providers.json` |
+| CLI | `/home/neur0map/polymaster-test/integration/dist/cli.js` |
+| Skill | `~/.openclaw/skills/wwatcher-ai/SKILL.md` |
 
 ## 6. Research & Estimation Workflow
 
-When an alert fires, follow the appropriate workflow based on market category:
-
 ### Crypto Alerts
-1. Pull current price + 24h trend + volume via `fetch_market_data`
-2. Compare whale's entry price (from `price_percent`) to current market price
-3. Estimate if whale is ahead/behind on their position
-4. Assess market sentiment: is this a contrarian bet or riding momentum?
-5. Flag: large position size, repeat actor status, exit signals
+1. `wwatcher-ai fetch "BTC..."` → CoinMarketCap price
+2. Compare whale's entry price (from `price_percent`) to current market
+3. Estimate if whale is ahead/behind, assess momentum vs contrarian
 
 ### Sports Alerts
-1. Pull odds from `fetch_market_data` → The Odds API
-2. If outdoor game, also pull weather data
-3. Cross-reference whale's bet side with consensus odds
-4. Look for: injury news, recent form, head-to-head records
-5. Estimate probability and compare with market implied probability
-6. Flag: whale betting against consensus, multiple whales same game
+1. `wwatcher-ai fetch "Team A vs Team B" --category=sports` → odds
+2. Cross-reference whale's bet side with consensus
+3. Research injuries, form, head-to-head
 
 ### Weather Alerts
-1. Pull multi-day forecast via `fetch_market_data` → Open Weather
-2. Compare the threshold in the market (e.g., "high temp ≥ 63°F") with forecast
-3. Estimate probability based on forecast confidence
-4. Flag: forecast uncertainty, upcoming weather pattern changes
+1. `wwatcher-ai fetch "City high temp..." --category=weather` → forecast
+2. Compare threshold in market to forecast range
+3. Assess forecast confidence
 
-### Political Alerts
-1. Pull recent news via `fetch_market_data` with category "news"
-2. Assess current probability vs market price
-3. Look for: polling data, recent events, policy announcements
-4. Identify if whale sees something the market hasn't priced in
-5. Flag: heavy actor exits, contrarian bets on unlikely outcomes
-
-### General / Unknown Category
-1. Pull news articles related to the market title
-2. Perform sentiment analysis on recent coverage
-3. Present context: what is this market about, what are the key factors
-4. Flag: any unusual patterns (timing, size, repeat actors)
+### Political/News Alerts
+1. `wwatcher-ai fetch "Market title" --category=news` → articles
+2. Look for recent events affecting probability
+3. Identify if whale sees something market hasn't priced
 
 ## 7. Adding New RapidAPI Providers
 
-To add a new data source, edit `integration/providers.json`:
+Edit `/home/neur0map/polymaster-test/integration/providers.json`:
 
 ```json
 {
@@ -258,6 +194,4 @@ To add a new data source, edit `integration/providers.json`:
 }
 ```
 
-**No code changes needed** — the fetcher reads providers.json dynamically at startup.
-
-Tell the user which RapidAPI subscription is needed for the new provider.
+No code changes needed — the CLI reads providers.json dynamically.
