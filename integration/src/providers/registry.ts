@@ -1,9 +1,10 @@
 import * as fs from "fs";
+import * as path from "path";
 import type { Provider, ProvidersConfig } from "../util/types.js";
 
 /**
- * Loads providers.json and routes requests by matching keywords against
- * market titles / categories.
+ * Loads providers from a directory of JSON files (one per category).
+ * Routes requests by matching keywords against market titles / categories.
  */
 export class ProviderRegistry {
   private providers: ProvidersConfig = {};
@@ -13,12 +14,39 @@ export class ProviderRegistry {
   }
 
   private load(configPath: string): void {
-    if (!fs.existsSync(configPath)) {
-      console.error(`[ProviderRegistry] providers.json not found at ${configPath}`);
-      return;
+    // Check if it's a directory or single file
+    if (fs.existsSync(configPath) && fs.statSync(configPath).isDirectory()) {
+      this.loadFromDirectory(configPath);
+    } else if (fs.existsSync(configPath)) {
+      // Legacy: single providers.json file
+      this.loadFromFile(configPath);
+    } else {
+      console.error(`[ProviderRegistry] Provider config not found at ${configPath}`);
     }
-    const raw = fs.readFileSync(configPath, "utf-8");
-    this.providers = JSON.parse(raw) as ProvidersConfig;
+  }
+
+  private loadFromDirectory(dirPath: string): void {
+    const files = fs.readdirSync(dirPath).filter(f => f.endsWith(".json"));
+    for (const file of files) {
+      const filePath = path.join(dirPath, file);
+      try {
+        const raw = fs.readFileSync(filePath, "utf-8");
+        const parsed = JSON.parse(raw) as ProvidersConfig;
+        // Merge providers from this file
+        Object.assign(this.providers, parsed);
+      } catch (err) {
+        console.error(`[ProviderRegistry] Failed to load ${file}:`, err);
+      }
+    }
+  }
+
+  private loadFromFile(filePath: string): void {
+    try {
+      const raw = fs.readFileSync(filePath, "utf-8");
+      this.providers = JSON.parse(raw) as ProvidersConfig;
+    } catch (err) {
+      console.error(`[ProviderRegistry] Failed to load providers.json:`, err);
+    }
   }
 
   /** Get all loaded providers */
@@ -38,6 +66,12 @@ export class ProviderRegistry {
       name: p.name,
       category: p.category,
     }));
+  }
+
+  /** List unique categories */
+  categories(): string[] {
+    const cats = new Set(Object.values(this.providers).map(p => p.category));
+    return Array.from(cats).sort();
   }
 
   /**

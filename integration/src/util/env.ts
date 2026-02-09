@@ -32,7 +32,7 @@ export function loadEnv(): EnvConfig {
 
   const providersConfigPath = resolveHomePath(
     process.env.PROVIDERS_CONFIG ||
-      path.join(integrationDir, "providers.json")
+      path.join(integrationDir, "providers")
   );
 
   return {
