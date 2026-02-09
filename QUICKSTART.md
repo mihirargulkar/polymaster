@@ -571,6 +571,57 @@ Asset ID: 65396714035221124737...
 ======================================================================
 ```
 
+## AI Agent Integration
+
+wwatcher can be used with AI agents (OpenClaw, Claude Code) for automated research and analysis.
+
+### Quick Setup
+
+```bash
+# Build the integration
+cd integration
+npm install
+npm run build
+
+# Configure RapidAPI (optional, for market data)
+cp .env.example .env
+# Edit .env and add: RAPIDAPI_KEY=your-key
+```
+
+### OpenClaw CLI
+
+```bash
+cd integration
+
+# Health check
+node dist/cli.js status
+
+# Query alerts
+node dist/cli.js alerts --limit=10 --min=50000
+node dist/cli.js alerts --platform=polymarket --type=WHALE_ENTRY
+
+# Get market data
+node dist/cli.js fetch "Bitcoin price above 100k"
+node dist/cli.js fetch "Lakers vs Celtics" --category=sports
+```
+
+### Install OpenClaw Skill
+
+```bash
+mkdir -p ~/.openclaw/skills/wwatcher-ai
+cp integration/skill/SKILL.md ~/.openclaw/skills/wwatcher-ai/SKILL.md
+```
+
+### MCP Server (Claude Code)
+
+```bash
+npm run start:mcp
+```
+
+See [`integration/README.md`](./integration/README.md) for full details.
+
+---
+
 ## Troubleshooting
 
 ### Rate limit errors
