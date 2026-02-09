@@ -22,7 +22,7 @@ export interface PerplexitySearchResult {
 export async function queryPerplexity(
   query: string,
   apiKey: string,
-  model: string = "llama-3.1-sonar-small-128k-online"
+  model: string = "sonar"
 ): Promise<PerplexityResponse> {
   try {
     const response = await fetch("https://api.perplexity.ai/chat/completions", {
