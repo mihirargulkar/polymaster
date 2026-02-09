@@ -1,0 +1,73 @@
+{
+  "weather": {
+    "name": "Open Weather",
+    "category": "weather",
+    "rapidapi_host": "open-weather13.p.rapidapi.com",
+    "env_key": "RAPIDAPI_KEY",
+    "keywords": ["temperature", "weather", "forecast", "high temp", "low temp", "rain", "snow"],
+    "endpoints": {
+      "five_day_forecast": {
+        "method": "GET",
+        "path": "/city/fivedaysforcast/{latitude}/{longitude}/EN",
+        "description": "5-day weather forecast for a location",
+        "params": {
+          "latitude": { "type": "number", "required": true, "description": "Location latitude" },
+          "longitude": { "type": "number", "required": true, "description": "Location longitude" }
+        }
+      }
+    }
+  },
+  "crypto": {
+    "name": "CoinMarketCap",
+    "category": "crypto",
+    "rapidapi_host": "coinmarketcap-api1.p.rapidapi.com",
+    "env_key": "RAPIDAPI_KEY",
+    "keywords": ["bitcoin", "BTC", "ethereum", "ETH", "solana", "SOL", "crypto", "price"],
+    "endpoints": {
+      "latest_quotes": {
+        "method": "GET",
+        "path": "/v1/cryptocurrency/quotes/latest",
+        "description": "Latest price quotes for cryptocurrencies",
+        "params": {
+          "symbol": { "type": "string", "required": true, "description": "Crypto symbol (BTC,ETH)" }
+        }
+      }
+    }
+  },
+  "sports": {
+    "name": "The Odds API",
+    "category": "sports",
+    "rapidapi_host": "therundown-therundown-v1.p.rapidapi.com",
+    "env_key": "RAPIDAPI_KEY",
+    "keywords": ["NFL", "NBA", "NHL", "MLB", "game", "win", "spread", "total points", "soccer"],
+    "endpoints": {
+      "odds": {
+        "method": "GET",
+        "path": "/sports/{sport}/odds",
+        "description": "Current odds for upcoming games",
+        "params": {
+          "sport": { "type": "string", "required": true, "description": "Sport key (e.g., basketball_nba)" }
+        }
+      }
+    }
+  },
+  "news": {
+    "name": "Newscatcher",
+    "category": "news",
+    "rapidapi_host": "newscatcher.p.rapidapi.com",
+    "env_key": "RAPIDAPI_KEY",
+    "keywords": [],
+    "match_all": true,
+    "endpoints": {
+      "search": {
+        "method": "GET",
+        "path": "/v2/search",
+        "description": "Search news articles by keyword",
+        "params": {
+          "q": { "type": "string", "required": true, "description": "Search query" },
+          "lang": { "type": "string", "required": false, "default": "en" }
+        }
+      }
+    }
+  }
+}

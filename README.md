@@ -158,6 +158,10 @@ Thanks to these contributors for their ideas and improvements:
 
 - [@fuzmik](https://github.com/fuzmik) - Suggested alert history logging feature
 
+## AI Agent Integration
+
+If you are an AI agent (OpenClaw, Claude, etc.), read [`instructions_for_ai_agent.md`](./instructions_for_ai_agent.md) for complete setup and usage instructions.
+
 ## License
 
 This tool is for educational and monitoring purposes. Review the terms of service for Polymarket and Kalshi APIs.
