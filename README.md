@@ -160,9 +160,9 @@ Thanks to these contributors for their ideas and improvements:
 
 ## AI Agent Integration
 
-wwatcher includes an AI integration layer that turns whale alerts into actionable research.
+wwatcher includes an AI integration layer that turns whale alerts into actionable research. When you receive a whale alert, the agent investigates using RapidAPI data sources, analyzes the position, and delivers research-backed insights.
 
-### For OpenClaw Agents
+### Quick Start
 
 ```bash
 # Build the CLI
@@ -170,27 +170,50 @@ cd integration
 npm install
 npm run build
 
-# Install the skill
-mkdir -p ~/.openclaw/skills/wwatcher-ai
-cp skill/SKILL.md ~/.openclaw/skills/wwatcher-ai/SKILL.md
+# Configure your API key
+echo "RAPIDAPI_KEY=your-key-here" > .env
+
+# Test it works
+node dist/cli.js status
+node dist/cli.js fetch "Bitcoin price above 100k"
 ```
 
-CLI commands:
+### CLI Commands
+
 ```bash
-cd integration
 node dist/cli.js status                           # Health check
 node dist/cli.js alerts --limit=10 --min=50000    # Query alerts
 node dist/cli.js summary                          # Aggregate stats
 node dist/cli.js search "bitcoin"                 # Search alerts
-node dist/cli.js fetch "BTC price above 100k"    # Get market data
+node dist/cli.js fetch "BTC price above 100k"    # Fetch market data
+node dist/cli.js fetch "Lakers game" --category=sports
 ```
 
-### For MCP Clients (Claude Code)
+### Modular Provider System
+
+Providers are organized by category in `integration/providers/`:
+
+```
+providers/
+├── crypto.json     # Cryptocurrency APIs (Coinranking)
+├── sports.json     # Sports data (NBA API)
+├── weather.json    # Weather forecasts (Meteostat)
+├── news.json       # News aggregation (Crypto News)
+└── README.md       # How to add more providers
+```
+
+**Adding new providers**: Create a new JSON file or add to existing category files. See [`integration/providers/README.md`](./integration/providers/README.md) for the full schema and examples.
+
+### OpenClaw Skill Installation
 
 ```bash
-cd integration
-npm install
-npm run build
+mkdir -p ~/.openclaw/skills/wwatcher-ai
+cp integration/skill/SKILL.md ~/.openclaw/skills/wwatcher-ai/SKILL.md
+```
+
+### MCP Server (Claude Code)
+
+```bash
 npm run start:mcp
 ```
 
@@ -208,22 +231,21 @@ Add to your MCP config:
 
 ### RapidAPI Setup
 
-Get contextual market data by subscribing to these RapidAPI services:
-- [Open Weather](https://rapidapi.com/worldapi/api/open-weather13) — forecasts
-- [CoinMarketCap](https://rapidapi.com/coinmarketcap/api/coinmarketcap-api1) — crypto prices
-- [The Odds API](https://rapidapi.com/therundown/api/therundown-therundown-v1) — sports odds
-- [Newscatcher](https://rapidapi.com/newscatcher-api-newscatcher-api-default/api/newscatcher) — news
+Your single API key works for all subscribed services. Subscribe to these (free tiers available):
 
-Add your key to `integration/.env`:
-```
-RAPIDAPI_KEY=your-key-here
-```
+| Category | API | Link |
+|----------|-----|------|
+| Crypto | Coinranking | [rapidapi.com/Coinranking/api/coinranking1](https://rapidapi.com/Coinranking/api/coinranking1) |
+| Sports | NBA API | [rapidapi.com/api-sports/api/nba-api-free-data](https://rapidapi.com/api-sports/api/nba-api-free-data) |
+| Weather | Meteostat | [rapidapi.com/meteostat/api/meteostat](https://rapidapi.com/meteostat/api/meteostat) |
+| News | Crypto News | [rapidapi.com/Starter-api/api/cryptocurrency-news2](https://rapidapi.com/Starter-api/api/cryptocurrency-news2) |
 
-### Full Documentation
+### Documentation
 
+- [`integration/providers/README.md`](./integration/providers/README.md) — Adding custom providers
+- [`integration/skill/SKILL.md`](./integration/skill/SKILL.md) — OpenClaw skill reference
 - [`instructions_for_ai_agent.md`](./instructions_for_ai_agent.md) — Complete agent instructions
 - [`integration/README.md`](./integration/README.md) — CLI and MCP server details
-- [`integration/skill/SKILL.md`](./integration/skill/SKILL.md) — OpenClaw skill reference
 
 ## License
 

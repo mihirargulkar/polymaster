@@ -19,11 +19,16 @@ npm run build
 2. Add your RapidAPI key: `RAPIDAPI_KEY=your-key`
 3. Get your key at https://rapidapi.com
 
-Subscribe to these APIs:
-- [Open Weather](https://rapidapi.com/worldapi/api/open-weather13)
-- [CoinMarketCap](https://rapidapi.com/coinmarketcap/api/coinmarketcap-api1)
-- [The Odds API](https://rapidapi.com/therundown/api/therundown-therundown-v1)
-- [Newscatcher](https://rapidapi.com/newscatcher-api-newscatcher-api-default/api/newscatcher)
+Subscribe to these APIs (free tiers available):
+
+| Category | API | Link |
+|----------|-----|------|
+| Crypto | Coinranking | [rapidapi.com/Coinranking/api/coinranking1](https://rapidapi.com/Coinranking/api/coinranking1) |
+| Sports | NBA API | [rapidapi.com/api-sports/api/nba-api-free-data](https://rapidapi.com/api-sports/api/nba-api-free-data) |
+| Weather | Meteostat | [rapidapi.com/meteostat/api/meteostat](https://rapidapi.com/meteostat/api/meteostat) |
+| News | Crypto News | [rapidapi.com/Starter-api/api/cryptocurrency-news2](https://rapidapi.com/Starter-api/api/cryptocurrency-news2) |
+
+Your single API key works for all subscribed services.
 
 ---
 
@@ -126,36 +131,46 @@ node dist/index.js
 
 ## Providers
 
-Data providers are configured in `providers.json`. Add new providers by editing this file — no code changes needed.
+Providers are organized by category in the `providers/` directory:
 
-| Provider | Category | Data |
-|----------|----------|------|
-| Open Weather | weather | 5-day forecasts |
-| CoinMarketCap | crypto | Price quotes |
-| The Odds API | sports | Game odds |
-| Newscatcher | news | Article search |
+```
+providers/
+├── README.md       # Full documentation for adding providers
+├── crypto.json     # Coinranking (BTC, ETH, SOL prices)
+├── sports.json     # NBA API (games, scores)
+├── weather.json    # Meteostat (forecasts)
+└── news.json       # Cryptocurrency News
+```
 
 ### Adding a Provider
 
+**Option 1**: Add to an existing category file (e.g., `providers/crypto.json`)
+
+**Option 2**: Create a new category file (e.g., `providers/politics.json`)
+
 ```json
 {
-  "your_provider": {
-    "name": "Provider Name",
-    "category": "category",
-    "rapidapi_host": "api-host.p.rapidapi.com",
+  "provider_key": {
+    "name": "Display Name",
+    "category": "politics",
+    "rapidapi_host": "api.p.rapidapi.com",
     "env_key": "RAPIDAPI_KEY",
-    "keywords": ["keyword1", "keyword2"],
+    "keywords": ["election", "president", "vote"],
     "endpoints": {
-      "main": {
+      "markets": {
         "method": "GET",
-        "path": "/v1/endpoint",
-        "description": "What it does",
+        "path": "/v1/markets",
+        "description": "What it returns",
         "params": {}
       }
     }
   }
 }
 ```
+
+The system automatically loads all `*.json` files from the `providers/` directory.
+
+See [`providers/README.md`](./providers/README.md) for the complete schema and examples.
 
 ---
 
