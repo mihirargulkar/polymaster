@@ -1,6 +1,9 @@
 use colored::*;
+use rusqlite::Connection;
 
-pub async fn show_status() -> Result<(), Box<dyn std::error::Error>> {
+use crate::db;
+
+pub async fn show_status(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
     println!("{}", "WHALE WATCHER STATUS".bright_cyan().bold());
     println!();
 
@@ -27,10 +30,42 @@ pub async fn show_status() -> Result<(), Box<dyn std::error::Error>> {
                     "Not configured".yellow()
                 }
             );
+            println!(
+                "  AI Agent Mode: {}",
+                if cfg.ai_agent_mode {
+                    "Enabled".green()
+                } else {
+                    "Disabled".yellow()
+                }
+            );
+            let cat_display = if cfg.categories.is_empty() || cfg.categories.iter().any(|s| s == "all") {
+                "All markets".to_string()
+            } else {
+                cfg.categories.join(", ")
+            };
+            println!("  Categories:    {}", cat_display.green());
+            println!("  Threshold:     {}", format!("${}", cfg.threshold).green());
+            println!(
+                "  Retention:     {}",
+                if cfg.history_retention_days == 0 {
+                    "Forever".to_string()
+                } else {
+                    format!("{} days", cfg.history_retention_days)
+                }
+                .green()
+            );
         }
         Err(_) => {
             println!("No configuration found. Run 'wwatcher setup' to configure.");
         }
+    }
+
+    println!();
+    println!("Database:");
+    let alert_count = db::alert_count(conn);
+    println!("  Alerts stored: {}", alert_count.to_string().bright_white());
+    if let Ok(path) = db::db_path() {
+        println!("  Location: {}", path.display().to_string().dimmed());
     }
 
     Ok(())

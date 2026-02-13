@@ -1,10 +1,51 @@
 use colored::*;
 
+use crate::alerts::MarketContext;
 use crate::platforms::{kalshi, polymarket};
-use crate::types;
+use crate::types::{self, WhaleReturnScenario};
 
 use super::anomaly;
 use super::sound;
+
+pub fn print_market_context(ctx: &MarketContext) {
+    println!();
+    println!("{}", "[MARKET CONTEXT]".bright_blue().bold());
+    println!(
+        "Odds:          YES {:.1}% | NO {:.1}%",
+        ctx.yes_price * 100.0,
+        ctx.no_price * 100.0
+    );
+    if ctx.spread > 0.0 {
+        let spread_label = if ctx.spread <= 0.02 {
+            "tight"
+        } else if ctx.spread <= 0.05 {
+            "moderate"
+        } else {
+            "wide"
+        };
+        println!(
+            "Spread:        ${:.2} ({})",
+            ctx.spread, spread_label
+        );
+    }
+    if ctx.volume_24h > 0.0 {
+        println!("24h Volume:    ${:.0}", ctx.volume_24h);
+    }
+    if ctx.open_interest > 0.0 {
+        println!("Open Interest: ${:.0}", ctx.open_interest);
+    }
+    if ctx.price_change_24h != 0.0 {
+        let change_color = if ctx.price_change_24h > 0.0 {
+            format!("+{:.1}%", ctx.price_change_24h).bright_green()
+        } else {
+            format!("{:.1}%", ctx.price_change_24h).bright_red()
+        };
+        println!("24h Move:      {}", change_color);
+    }
+    if ctx.liquidity > 0.0 {
+        println!("Liquidity:     ${:.0}", ctx.liquidity);
+    }
+}
 
 pub fn print_whale_alert(
     platform: &str,
@@ -146,7 +187,9 @@ pub fn print_kalshi_alert(
     value: f64,
     wallet_activity: Option<&types::WalletActivity>,
 ) {
-    let is_sell = trade.taker_side.to_lowercase() == "sell";
+    // Kalshi taker_side is "yes" or "no", never "sell"
+    // We cannot detect exits from the public Kalshi trade API
+    let is_sell = false;
 
     if is_sell {
         sound::play_triple_beep();
@@ -217,25 +260,12 @@ pub fn print_kalshi_alert(
     };
     println!("Position:   {}", bet_color);
 
-    let direction_text = if is_sell {
-        format!(
-            "{} (EXITING {} position)",
-            trade.taker_side.to_uppercase(),
-            trade.taker_side.to_uppercase()
-        )
-    } else {
-        format!(
-            "{} (buying {} outcome)",
-            trade.taker_side.to_uppercase(),
-            trade.taker_side.to_uppercase()
-        )
-    };
-    let direction_color = if is_sell {
-        direction_text.bright_red()
-    } else {
-        direction_text.bright_magenta()
-    };
-    println!("Direction:  {}", direction_color);
+    let direction_text = format!(
+        "{} (buying {} outcome)",
+        trade.taker_side.to_uppercase(),
+        trade.taker_side.to_uppercase()
+    );
+    println!("Direction:  {}", direction_text.bright_magenta());
 
     println!();
     println!("{}", "TRANSACTION DETAILS".dimmed());
@@ -287,6 +317,92 @@ pub fn print_kalshi_alert(
 
     println!("{}", "=".repeat(70).dimmed());
     println!();
+}
+
+pub fn print_returning_whale(scenario: &WhaleReturnScenario, platform: &str) {
+    match scenario {
+        WhaleReturnScenario::DoublingDown {
+            previous_value,
+            previous_txns,
+            total_12h_volume,
+            total_12h_txns,
+        } => {
+            sound::play_triple_beep();
+            println!();
+            println!(
+                "{}",
+                format!("[RETURNING WHALE] Doubling down - {}", platform)
+                    .bright_magenta()
+                    .bold()
+            );
+            println!(
+                "Previous: {} txns totaling ${:.0} in this market",
+                previous_txns, previous_value
+            );
+            println!(
+                "12h total: {} txns, ${:.0} volume",
+                total_12h_txns, total_12h_volume
+            );
+        }
+        WhaleReturnScenario::Flip {
+            previous_outcome,
+            previous_value,
+            hours_ago,
+            total_12h_volume,
+            total_12h_txns,
+        } => {
+            sound::play_triple_beep();
+            println!();
+            println!(
+                "{}",
+                format!("[WHALE FLIP] Changed position - {}", platform)
+                    .bright_red()
+                    .bold()
+            );
+            println!(
+                "Was {} (${:.0}) {:.1}h ago - now taking opposite side",
+                previous_outcome.to_uppercase(),
+                previous_value,
+                hours_ago
+            );
+            println!(
+                "12h total: {} txns, ${:.0} volume",
+                total_12h_txns, total_12h_volume
+            );
+        }
+        WhaleReturnScenario::KnownWhale {
+            total_12h_volume,
+            total_12h_txns,
+            previous_entries,
+        } => {
+            println!();
+            println!(
+                "{}",
+                format!(
+                    "[KNOWN WHALE] {} txns in 12h totaling ${:.0} - {}",
+                    total_12h_txns, total_12h_volume, platform
+                )
+                .bright_cyan()
+                .bold()
+            );
+            // Show up to 3 most recent positions
+            for entry in previous_entries.iter().take(3) {
+                let title = entry
+                    .market_title
+                    .as_deref()
+                    .unwrap_or("Unknown market");
+                let outcome = entry.outcome.as_deref().unwrap_or("?");
+                println!(
+                    "  {} {} ${:.0} @ {:.0}% - {}",
+                    entry.action.as_deref().unwrap_or("?"),
+                    outcome,
+                    entry.value,
+                    entry.price * 100.0,
+                    title
+                );
+            }
+        }
+    }
 }
 
 pub fn format_number(n: u64) -> String {

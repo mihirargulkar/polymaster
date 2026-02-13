@@ -1,43 +1,64 @@
-use std::io::Write;
-
 use colored::*;
+use rusqlite::Connection;
 
 use super::AlertData;
+use crate::db;
 
-pub fn get_history_file_path() -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
-    let config_dir = dirs::config_dir().ok_or("Could not determine config directory")?;
-    let wwatcher_dir = config_dir.join("wwatcher");
-    std::fs::create_dir_all(&wwatcher_dir)?;
-    Ok(wwatcher_dir.join("alert_history.jsonl"))
-}
+/// Log an alert to the SQLite database
+pub fn log_alert(alert: &AlertData, conn: &Connection) {
+    let wallet_activity_json = alert.wallet_activity.map(|wa| {
+        serde_json::json!({
+            "transactions_last_hour": wa.transactions_last_hour,
+            "transactions_last_day": wa.transactions_last_day,
+            "total_value_hour": wa.total_value_hour,
+            "total_value_day": wa.total_value_day,
+            "is_repeat_actor": wa.is_repeat_actor,
+            "is_heavy_actor": wa.is_heavy_actor,
+        })
+        .to_string()
+    });
 
-pub fn log_alert(alert: &AlertData) {
-    if let Ok(history_file) = get_history_file_path() {
-        let log_entry = super::build_alert_payload(alert, false);
+    let market_context_json = alert.market_context.map(|ctx| {
+        serde_json::json!({
+            "yes_price": ctx.yes_price,
+            "no_price": ctx.no_price,
+            "spread": ctx.spread,
+            "volume_24h": ctx.volume_24h,
+            "open_interest": ctx.open_interest,
+            "price_change_24h": ctx.price_change_24h,
+            "liquidity": ctx.liquidity,
+        })
+        .to_string()
+    });
 
-        if let Ok(mut file) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&history_file)
-        {
-            if let Ok(json_line) = serde_json::to_string(&log_entry) {
-                let _ = writeln!(file, "{}", json_line);
-            }
-        }
-    }
+    db::insert_alert(
+        conn,
+        alert.platform,
+        alert.alert_type(),
+        &alert.side.to_uppercase(),
+        alert.value,
+        alert.price,
+        alert.size,
+        alert.market_title,
+        None,
+        alert.outcome,
+        alert.wallet_id,
+        alert.timestamp,
+        market_context_json.as_deref(),
+        wallet_activity_json.as_deref(),
+    );
 }
 
 pub fn show_alert_history(
     limit: usize,
     platform_filter: &str,
     as_json: bool,
+    conn: &Connection,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use serde_json::Value;
+    let alerts = db::query_alerts(conn, limit, platform_filter)?;
 
-    let history_file = get_history_file_path()?;
-
-    if !history_file.exists() {
-        println!("No alert history found.");
+    if alerts.is_empty() {
+        println!("No alerts found matching filters.");
         println!(
             "Run {} to start monitoring and logging alerts.",
             "wwatcher watch".bright_cyan()
@@ -45,43 +66,17 @@ pub fn show_alert_history(
         return Ok(());
     }
 
-    let contents = std::fs::read_to_string(&history_file)?;
-    let mut alerts: Vec<Value> = contents
-        .lines()
-        .filter_map(|line| serde_json::from_str(line).ok())
-        .collect();
-
-    if platform_filter != "all" {
-        let filter_lower = platform_filter.to_lowercase();
-        alerts.retain(|alert| {
-            alert
-                .get("platform")
-                .and_then(|p| p.as_str())
-                .map(|p| p.to_lowercase() == filter_lower)
-                .unwrap_or(false)
-        });
-    }
-
-    alerts.reverse();
-
-    let alerts_to_show: Vec<&Value> = alerts.iter().take(limit).collect();
-
-    if alerts_to_show.is_empty() {
-        println!("No alerts found matching filters.");
-        return Ok(());
-    }
-
     if as_json {
-        println!("{}", serde_json::to_string_pretty(&alerts_to_show)?);
+        println!("{}", serde_json::to_string_pretty(&alerts)?);
     } else {
         println!("{}", "ALERT HISTORY".bright_cyan().bold());
-        println!("Showing {} most recent alerts", alerts_to_show.len());
+        println!("Showing {} most recent alerts", alerts.len());
         if platform_filter != "all" {
             println!("Platform filter: {}", platform_filter);
         }
         println!();
 
-        for (i, alert) in alerts_to_show.iter().enumerate() {
+        for (i, alert) in alerts.iter().enumerate() {
             let platform = alert
                 .get("platform")
                 .and_then(|v| v.as_str())
@@ -128,6 +123,11 @@ pub fn show_alert_history(
             println!();
         }
 
+        let total = db::alert_count(conn);
+        println!(
+            "Total alerts in database: {}",
+            total.to_string().bright_white()
+        );
         println!(
             "View as JSON: {} --json",
             "wwatcher history".bright_cyan()

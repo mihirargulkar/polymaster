@@ -1,6 +1,8 @@
 mod alerts;
+mod categories;
 mod commands;
 mod config;
+mod db;
 mod platforms;
 mod types;
 
@@ -54,25 +56,31 @@ enum Commands {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
+    // Initialize database for commands that need it
+    let conn = db::open_db()?;
+
+    // Migrate old JSONL history on first run
+    db::migrate_jsonl_if_exists(&conn);
+
     match cli.command {
         Commands::Setup => {
             commands::setup::setup_config().await?;
         }
         Commands::Status => {
-            commands::status::show_status().await?;
+            commands::status::show_status(&conn).await?;
         }
         Commands::Watch {
             threshold,
             interval,
         } => {
-            commands::watch::watch_whales(threshold, interval).await?;
+            commands::watch::watch_whales(threshold, interval, conn).await?;
         }
         Commands::History {
             limit,
             platform,
             json,
         } => {
-            alerts::history::show_alert_history(limit, &platform, json)?;
+            alerts::history::show_alert_history(limit, &platform, json, &conn)?;
         }
         Commands::TestSound => {
             commands::test::test_sound().await?;

@@ -6,6 +6,18 @@ pub mod webhook;
 
 use crate::types;
 
+/// Market context data fetched per whale alert for edge detection
+#[derive(Debug, Clone)]
+pub struct MarketContext {
+    pub yes_price: f64,
+    pub no_price: f64,
+    pub spread: f64,
+    pub volume_24h: f64,
+    pub open_interest: f64,
+    pub price_change_24h: f64,
+    pub liquidity: f64,
+}
+
 /// Shared alert data structure used by webhook, logging, and display
 pub struct AlertData<'a> {
     pub platform: &'a str,
@@ -18,6 +30,7 @@ pub struct AlertData<'a> {
     pub timestamp: &'a str,
     pub wallet_id: Option<&'a str>,
     pub wallet_activity: Option<&'a types::WalletActivity>,
+    pub market_context: Option<&'a MarketContext>,
 }
 
 impl<'a> AlertData<'a> {
@@ -71,6 +84,18 @@ pub fn build_alert_payload(alert: &AlertData, escape_text: bool) -> serde_json::
             "total_value_day": activity.total_value_day,
             "is_repeat_actor": activity.is_repeat_actor,
             "is_heavy_actor": activity.is_heavy_actor,
+        });
+    }
+
+    if let Some(ctx) = alert.market_context {
+        payload["market_context"] = json!({
+            "yes_price": ctx.yes_price,
+            "no_price": ctx.no_price,
+            "spread": ctx.spread,
+            "volume_24h": ctx.volume_24h,
+            "open_interest": ctx.open_interest,
+            "price_change_24h": ctx.price_change_24h,
+            "liquidity": ctx.liquidity,
         });
     }
 

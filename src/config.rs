@@ -7,9 +7,41 @@ pub struct Config {
     pub kalshi_api_key_id: Option<String>,
     pub kalshi_private_key: Option<String>,
     pub webhook_url: Option<String>,
+    #[serde(default)]
     pub rapidapi_key: Option<String>,
+    #[serde(default)]
     pub perplexity_api_key: Option<String>,
+    #[serde(default)]
     pub ai_agent_mode: bool,
+    /// Selected market categories (e.g. ["sports:nba", "crypto:all", "politics:us_elections"])
+    /// Empty or ["all"] means watch everything
+    #[serde(default = "default_categories")]
+    pub categories: Vec<String>,
+    /// Default whale alert threshold in USD
+    #[serde(default = "default_threshold")]
+    pub threshold: u64,
+    /// Which platforms to monitor: ["polymarket", "kalshi"] or ["all"]
+    #[serde(default = "default_platforms")]
+    pub platforms: Vec<String>,
+    /// Days to retain alerts in the database (0 = keep forever)
+    #[serde(default = "default_retention_days")]
+    pub history_retention_days: u32,
+}
+
+fn default_categories() -> Vec<String> {
+    vec!["all".into()]
+}
+
+fn default_threshold() -> u64 {
+    25000
+}
+
+fn default_platforms() -> Vec<String> {
+    vec!["all".into()]
+}
+
+fn default_retention_days() -> u32 {
+    30
 }
 
 fn config_path() -> Result<PathBuf, Box<dyn std::error::Error>> {

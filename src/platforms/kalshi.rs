@@ -86,6 +86,69 @@ struct MarketData {
     subtitle: Option<String>,
 }
 
+pub async fn fetch_market_context(ticker: &str) -> Option<crate::alerts::MarketContext> {
+    let client = reqwest::Client::new();
+    let url = format!(
+        "https://api.elections.kalshi.com/trade-api/v2/markets/{}",
+        ticker
+    );
+
+    let response = client.get(&url).send().await.ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+
+    let text = response.text().await.ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let market = parsed.get("market")?;
+
+    let yes_bid = market.get("yes_bid")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0) / 100.0;
+    let yes_ask = market.get("yes_ask")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0) / 100.0;
+    let no_bid = market.get("no_bid")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0) / 100.0;
+
+    let spread = (yes_ask - yes_bid).abs();
+
+    let volume_24h = market.get("volume_24h")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+
+    let open_interest = market.get("open_interest")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+
+    let last_price = market.get("last_price")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0) / 100.0;
+    let prev_price = market.get("previous_price")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0) / 100.0;
+    let price_change_24h = if prev_price > 0.0 {
+        ((last_price - prev_price) / prev_price) * 100.0
+    } else {
+        0.0
+    };
+
+    let liquidity = market.get("liquidity")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+
+    Some(crate::alerts::MarketContext {
+        yes_price: yes_bid,
+        no_price: no_bid,
+        spread,
+        volume_24h,
+        open_interest,
+        price_change_24h,
+        liquidity,
+    })
+}
+
 pub async fn fetch_market_info(ticker: &str) -> Option<String> {
     let client = reqwest::Client::new();
     let url = format!(

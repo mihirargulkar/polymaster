@@ -54,6 +54,74 @@ struct ActivityItem {
     outcome: Option<String>,
 }
 
+pub async fn fetch_market_context(condition_id: &str) -> Option<crate::alerts::MarketContext> {
+    let client = reqwest::Client::new();
+    let url = format!(
+        "https://gamma-api.polymarket.com/markets?condition_ids={}",
+        condition_id
+    );
+
+    let response = client
+        .get(&url)
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .ok()?;
+
+    if !response.status().is_success() {
+        return None;
+    }
+
+    let text = response.text().await.ok()?;
+    let markets: Vec<serde_json::Value> = serde_json::from_str(&text).ok()?;
+    let market = markets.first()?;
+
+    let yes_price = market.get("outcomePrices")
+        .and_then(|v| v.as_str())
+        .and_then(|s| {
+            // outcomePrices is a JSON string like "[\"0.65\",\"0.35\"]"
+            let prices: Vec<String> = serde_json::from_str(s).ok()?;
+            prices.first()?.parse::<f64>().ok()
+        })
+        .or_else(|| {
+            market.get("bestBid").and_then(|v| v.as_str()).and_then(|s| s.parse::<f64>().ok())
+        })
+        .unwrap_or(0.0);
+
+    let no_price = 1.0 - yes_price;
+
+    let spread = market.get("spread")
+        .and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+        .unwrap_or(0.0);
+
+    let volume_24h = market.get("volume24hr")
+        .and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+        .unwrap_or(0.0);
+
+    let open_interest = market.get("openInterest")
+        .and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+        .unwrap_or(0.0);
+
+    let price_change_24h = market.get("oneDayPriceChange")
+        .and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+        .unwrap_or(0.0);
+
+    let liquidity = market.get("liquidityClob")
+        .or_else(|| market.get("liquidity"))
+        .and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+        .unwrap_or(0.0);
+
+    Some(crate::alerts::MarketContext {
+        yes_price,
+        no_price,
+        spread,
+        volume_24h,
+        open_interest,
+        price_change_24h,
+        liquidity,
+    })
+}
+
 pub async fn fetch_recent_trades() -> Result<Vec<Trade>, PolymarketError> {
     let client = reqwest::Client::new();
 

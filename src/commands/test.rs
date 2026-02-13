@@ -77,6 +77,7 @@ pub async fn test_webhook() -> Result<(), Box<dyn std::error::Error>> {
         timestamp: &timestamp,
         wallet_id: Some("0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb"),
         wallet_activity: Some(&test_activity),
+        market_context: None,
     };
     webhook::send_webhook_alert(&webhook_url, &buy_alert).await;
 
@@ -97,6 +98,7 @@ pub async fn test_webhook() -> Result<(), Box<dyn std::error::Error>> {
         timestamp: &timestamp2,
         wallet_id: None,
         wallet_activity: None,
+        market_context: None,
     };
     webhook::send_webhook_alert(&webhook_url, &sell_alert).await;
 
