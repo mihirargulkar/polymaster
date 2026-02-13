@@ -19,6 +19,14 @@
 
 ## Quick Reference
 
+**First time setup:**
+```bash
+cd ~/polymaster/integration
+npm install
+npm run build
+```
+
+**CLI commands:**
 ```bash
 cd ~/polymaster/integration
 
@@ -44,12 +52,12 @@ node dist/cli.js preferences show          # Preferences schema
 ## User Preferences
 
 The user can set alert filters at any time using natural language.
-Store preferences in memory under key `wwatcher_preferences`.
+Store preferences in `memory/wwatcher_preferences.json` (OpenClaw workspace).
 
 **When a whale alert arrives:**
-1. Load preferences from memory key `wwatcher_preferences`
+1. Load preferences from `memory/wwatcher_preferences.json`
 2. Check each filter against the alert data
-3. If any filter fails, silently skip (do not respond)
+3. If any filter fails, silently skip (unless `debug: true`, then log skip reason)
 4. If all filters pass, proceed with research
 
 **When the user updates preferences**, confirm the change and show current active filters.
@@ -60,12 +68,20 @@ Store preferences in memory under key `wwatcher_preferences`.
   "min_value": 100000,
   "min_win_rate": 0.6,
   "max_leaderboard_rank": 100,
+  "max_odds": 0.80,
   "platforms": ["polymarket"],
   "categories": ["crypto", "politics"],
   "directions": ["buy"],
-  "tier_filter": "high"
+  "tier_filter": "high",
+  "debug": false
 }
 ```
+
+**Odds filter logic (`max_odds`):**
+- Filters out near-certainty bets where you need massive capital for small gains
+- BUY YES action → check `yes_price` <= max_odds
+- BUY NO action → check `no_price` <= max_odds
+- SELL actions → no odds filter (exiting position)
 
 **Natural language examples:**
 - "Only alert me on whales with 60%+ win rate" → `{ "min_win_rate": 0.6 }`
@@ -74,6 +90,8 @@ Store preferences in memory under key `wwatcher_preferences`.
 - "Top 100 leaderboard traders only" → `{ "max_leaderboard_rank": 100 }`
 - "Polymarket only" → `{ "platforms": ["polymarket"] }`
 - "Only high tier alerts" → `{ "tier_filter": "high" }`
+- "Skip near-certainties over 80% odds" → `{ "max_odds": 0.80 }`
+- "Show me why alerts are being skipped" → `{ "debug": true }`
 - "Show me my current filters" → read memory, list active preferences
 - "Reset my filters" → clear `wwatcher_preferences` from memory
 
@@ -93,15 +111,18 @@ From the incoming message, extract the full alert JSON including:
 
 ### Step 2: Check Preferences
 
-Load `wwatcher_preferences` from memory. If preferences exist, check:
+Load `memory/wwatcher_preferences.json`. If preferences exist, check:
 - `min_value`: alert.value >= min_value
 - `min_win_rate`: alert.whale_profile.win_rate >= min_win_rate
 - `max_leaderboard_rank`: alert.whale_profile.leaderboard_rank <= max_leaderboard_rank
+- `max_odds`: if BUY YES → yes_price <= max_odds; if BUY NO → no_price <= max_odds
 - `platforms`: alert.platform in platforms list
 - `categories`: any alert tag matches categories list
 - `directions`: alert.action matches directions list
 
-If any check fails → **silently skip** (do not respond).
+If any check fails:
+- If `debug: true` → log: "Skipped: [reason]"
+- Otherwise → **silently skip** (do not respond)
 
 ### Step 3: Score + Research
 
