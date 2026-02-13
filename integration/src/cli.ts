@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * wwatcher-ai CLI — OpenClaw-compatible interface for whale alert research
- * 
+ *
  * Commands:
  *   status                     Health check: history file, alert count, providers, API keys
  *   alerts [options]           Query recent alerts with filters
@@ -9,15 +9,20 @@
  *   search <query>             Search alerts by market title/outcome text
  *   fetch <market_title>       Fetch RapidAPI data for a market (crypto/sports/weather/news)
  *   perplexity <query>         Run a single Perplexity search
- *   research <market_title>    Full research: RapidAPI + 5 Perplexity searches + analysis
+ *   research <market_title>    Full research: RapidAPI + Perplexity + prediction markets
+ *   score <alert_json>         Score a whale alert, return tier + factors
+ *   preferences show           Show current alert preferences schema
  */
 
 import * as fs from "fs";
 import { AlertStore } from "./watcher/alert-store.js";
 import { ProviderRegistry } from "./providers/registry.js";
 import { fetchAutoFromProvider } from "./providers/fetcher.js";
-import { queryPerplexity, runResearchQueries, generateResearchQueries } from "./providers/perplexity.js";
+import { queryPerplexity, runResearchQueries, generateResearchQueries, generateContextQueries, buildResearchSignal } from "./providers/perplexity.js";
+import { fetchPredictionMarketData } from "./providers/prediction-fetcher.js";
+import { scoreAlert, passesPreferences } from "./scoring/scorer.js";
 import { loadEnv } from "./util/env.js";
+import type { WhalertAlert, AlertPreferences } from "./util/types.js";
 
 interface CliOptions {
   limit?: number;
@@ -27,6 +32,8 @@ interface CliOptions {
   since?: string;
   category?: string;
   queries?: number;
+  context?: string;
+  json?: boolean;
 }
 
 function parseArgs(args: string[]): { command: string; positional: string[]; options: CliOptions } {
@@ -37,7 +44,9 @@ function parseArgs(args: string[]): { command: string; positional: string[]; opt
   for (let i = 1; i < args.length; i++) {
     const arg = args[i];
     if (arg.startsWith("--")) {
-      const [key, value] = arg.slice(2).split("=");
+      const eqIdx = arg.indexOf("=");
+      const key = eqIdx >= 0 ? arg.slice(2, eqIdx) : arg.slice(2);
+      const value = eqIdx >= 0 ? arg.slice(eqIdx + 1) : args[++i];
       switch (key) {
         case "limit":
           options.limit = parseInt(value, 10);
@@ -63,6 +72,13 @@ function parseArgs(args: string[]): { command: string; positional: string[]; opt
         case "queries":
         case "q":
           options.queries = parseInt(value, 10);
+          break;
+        case "context":
+          options.context = value;
+          break;
+        case "json":
+          options.json = true;
+          i--; // no value consumed
           break;
       }
     } else if (arg.startsWith("-")) {
@@ -114,7 +130,9 @@ COMMANDS:
   search <query>             Search alerts by market title/outcome text
   fetch <market_title>       Fetch RapidAPI data for a market
   perplexity <query>         Run a single Perplexity search
-  research <market_title>    Full research: RapidAPI + Perplexity searches + prediction
+  research <market_title>    Full research: RapidAPI + Perplexity + prediction markets
+  score <alert_json>         Score a whale alert JSON, return tier + factors
+  preferences show           Show alert preferences schema and example
 
 ALERT OPTIONS:
   --limit=N, -l N            Max alerts to return (default: 20)
@@ -125,14 +143,17 @@ ALERT OPTIONS:
 
 FETCH/RESEARCH OPTIONS:
   --category=X, -c X         Override category (weather, crypto, sports, news, politics)
-  --queries=N, -q N          Number of Perplexity queries for research (default: 5)
+  --queries=N, -q N          Number of Perplexity queries for research (default: 3)
+  --context=JSON              Alert JSON for context-aware research (auto-scores + targeted queries)
 
 EXAMPLES:
   wwatcher-ai status
   wwatcher-ai alerts --limit=10 --min=50000
   wwatcher-ai fetch "Bitcoin price above 100k"
-  wwatcher-ai perplexity "What are the latest Bitcoin ETF inflows?"
   wwatcher-ai research "Bitcoin above 100k by March" --category=crypto
+  wwatcher-ai research "Bitcoin above 100k" --context='{"action":"BUY","value":50000,...}'
+  wwatcher-ai score '{"platform":"polymarket","action":"BUY","value":50000,...}'
+  wwatcher-ai preferences show
 `);
 }
 
@@ -217,6 +238,10 @@ async function main(): Promise<void> {
           timestamp: a.timestamp,
           wallet_id: a.wallet_id,
           wallet_activity: a.wallet_activity,
+          market_context: a.market_context,
+          whale_profile: a.whale_profile,
+          order_book: a.order_book,
+          top_holders: a.top_holders,
         })),
       };
       console.log(JSON.stringify(result, null, 2));
@@ -330,6 +355,58 @@ async function main(): Promise<void> {
       break;
     }
 
+    case "score": {
+      const alertJson = positional.join(" ");
+      if (!alertJson) {
+        console.error(JSON.stringify({ error: "Alert JSON required. Usage: wwatcher-ai score '<alert_json>'" }));
+        process.exit(1);
+      }
+
+      let alert: WhalertAlert;
+      try {
+        alert = JSON.parse(alertJson) as WhalertAlert;
+      } catch {
+        console.error(JSON.stringify({ error: "Invalid JSON. Provide a valid whale alert JSON object." }));
+        process.exit(1);
+      }
+
+      const alertScore = scoreAlert(alert);
+      console.log(JSON.stringify(alertScore, null, 2));
+      break;
+    }
+
+    case "preferences": {
+      const subcommand = positional[0] || "show";
+      if (subcommand === "show") {
+        const schema: AlertPreferences = {
+          min_value: 100000,
+          min_win_rate: 0.6,
+          max_leaderboard_rank: 100,
+          platforms: ["polymarket"],
+          categories: ["crypto", "politics"],
+          directions: ["buy"],
+          tier_filter: "high",
+        };
+        console.log(JSON.stringify({
+          description: "Alert preferences schema. Store in OpenClaw memory under key 'wwatcher_preferences'. All fields are optional — only set what you want to filter on.",
+          example: schema,
+          fields: {
+            min_value: "Minimum trade value in USD (e.g. 100000 = skip trades under $100k)",
+            min_win_rate: "Minimum whale win rate as decimal (e.g. 0.6 = 60%+). Polymarket only.",
+            max_leaderboard_rank: "Maximum leaderboard rank (e.g. 100 = top 100 traders only). Polymarket only.",
+            platforms: "Array of platforms to include (e.g. ['polymarket'])",
+            categories: "Array of market categories (e.g. ['crypto', 'politics']). Matches against tags.",
+            directions: "Array of trade directions (e.g. ['buy'] = entries only, ['sell'] = exits only)",
+            tier_filter: "Minimum alert tier after scoring ('high' or 'medium'). Skips low-tier alerts.",
+          },
+        }, null, 2));
+      } else {
+        console.error(JSON.stringify({ error: `Unknown preferences subcommand: ${subcommand}. Use: preferences show` }));
+        process.exit(1);
+      }
+      break;
+    }
+
     case "research": {
       const marketTitle = positional.join(" ");
       if (!marketTitle) {
@@ -337,76 +414,172 @@ async function main(): Promise<void> {
         process.exit(1);
       }
 
-      const missingKeys: string[] = [];
-      if (!env.rapidApiKey) missingKeys.push("RAPIDAPI_KEY");
-      if (!env.perplexityApiKey) missingKeys.push("PERPLEXITY_API_KEY");
-
-      if (missingKeys.length > 0) {
+      if (!env.perplexityApiKey) {
         console.log(JSON.stringify({
-          error: `Missing API keys: ${missingKeys.join(", ")}`,
-          help: "Full research requires both RAPIDAPI_KEY and PERPLEXITY_API_KEY in integration/.env",
+          error: "PERPLEXITY_API_KEY not configured",
+          help: "Research requires PERPLEXITY_API_KEY in integration/.env",
         }, null, 2));
         process.exit(1);
       }
 
-      // Step 1: Fetch RapidAPI data
+      // Parse optional alert context for context-aware research
+      let alertContext: WhalertAlert | null = null;
+      if (options.context) {
+        try {
+          alertContext = JSON.parse(options.context) as WhalertAlert;
+        } catch {
+          console.error(JSON.stringify({ error: "Invalid --context JSON" }));
+          process.exit(1);
+        }
+      }
+
+      // Step 1: Fetch RapidAPI data (if key configured)
       const matches = registry.match(marketTitle, options.category);
       let rapidApiResults: any[] = [];
 
-      if (matches.length > 0) {
+      if (env.rapidApiKey && matches.length > 0) {
         const providersToFetch = options.category
           ? matches
           : matches.filter((m) => !m.provider.match_all || matches.length === 1);
 
-        rapidApiResults = await Promise.all(
-          providersToFetch.map((m) =>
-            fetchAutoFromProvider(m.provider, marketTitle, env.rapidApiKey!)
-          )
+        // Exclude prediction-markets category from RapidAPI fetch (uses direct fetcher)
+        const rapidProviders = providersToFetch.filter((m) => m.provider.category !== "prediction-markets");
+
+        if (rapidProviders.length > 0) {
+          rapidApiResults = await Promise.all(
+            rapidProviders.map((m) =>
+              fetchAutoFromProvider(m.provider, marketTitle, env.rapidApiKey!)
+            )
+          );
+        }
+      }
+
+      // Step 2: Fetch prediction market data (no API key needed)
+      const predictionData = await fetchPredictionMarketData(
+        marketTitle,
+        alertContext?.platform || "polymarket"
+      );
+
+      // Step 3: Run Perplexity searches (context-aware if alert provided)
+      let perplexityResults;
+      let alertScore = null;
+      let signal = null;
+
+      if (alertContext) {
+        // Context-aware path: score the alert, generate targeted queries
+        alertScore = scoreAlert(alertContext);
+
+        // Compute bid imbalance
+        let bidImbalance: number | undefined;
+        if (alertContext.order_book) {
+          const total = alertContext.order_book.bid_depth_10pct + alertContext.order_book.ask_depth_10pct;
+          if (total > 0) bidImbalance = alertContext.order_book.bid_depth_10pct / total;
+        }
+
+        // Detect contrarian position
+        const yesPrice = alertContext.market_context?.yes_price || alertContext.price;
+        const isContrarian =
+          (alertContext.outcome?.toLowerCase() === "no" && alertContext.action === "BUY" && yesPrice > 0.6) ||
+          (alertContext.outcome?.toLowerCase() === "yes" && alertContext.action === "BUY" && yesPrice < 0.4);
+
+        const contextQueries = generateContextQueries(marketTitle, alertScore, {
+          action: alertContext.action,
+          outcome: alertContext.outcome,
+          value: alertContext.value,
+          platform: alertContext.platform,
+          winRate: alertContext.whale_profile?.win_rate,
+          rank: alertContext.whale_profile?.leaderboard_rank,
+          bidImbalance,
+          isHeavyActor: alertContext.wallet_activity?.is_heavy_actor,
+          isContrarian,
+          tags: alertContext.market_context?.tags,
+        });
+
+        perplexityResults = await runResearchQueries(
+          marketTitle,
+          env.perplexityApiKey!,
+          options.category,
+          contextQueries
+        );
+
+        // Build structured signal
+        signal = buildResearchSignal(perplexityResults.results, alertScore, {
+          action: alertContext.action,
+          outcome: alertContext.outcome,
+          value: alertContext.value,
+          winRate: alertContext.whale_profile?.win_rate,
+          rank: alertContext.whale_profile?.leaderboard_rank,
+          portfolio: alertContext.whale_profile?.portfolio_value,
+          bidImbalance,
+          isHeavyActor: alertContext.wallet_activity?.is_heavy_actor,
+        });
+      } else {
+        // Legacy path: generic research queries
+        const numQueries = options.queries || 5;
+        const queries = generateResearchQueries(marketTitle, options.category).slice(0, numQueries);
+        perplexityResults = await runResearchQueries(
+          marketTitle,
+          env.perplexityApiKey!,
+          options.category,
+          queries
         );
       }
 
-      // Step 2: Run Perplexity searches
-      const numQueries = options.queries || 5;
-      const queries = generateResearchQueries(marketTitle, options.category).slice(0, numQueries);
-      const perplexityResults = await runResearchQueries(
-        marketTitle,
-        env.perplexityApiKey!,
-        options.category,
-        queries
-      );
-
-      // Step 3: Compile research report
-      const report = {
+      // Step 4: Compile research report
+      const report: any = {
         market_title: marketTitle,
         category: options.category || (matches[0]?.provider.category ?? "general"),
         timestamp: new Date().toISOString(),
-        rapidapi_data: {
-          providers_matched: matches.map((m) => ({
-            name: m.provider.name,
-            category: m.provider.category,
-          })),
+      };
+
+      if (alertScore) {
+        report.alert_score = alertScore;
+      }
+
+      if (signal) {
+        report.signal = signal;
+      }
+
+      report.prediction_market_data = {
+        related_markets: predictionData.related_markets || [],
+        cross_platform: predictionData.cross_platform || null,
+        price_history_points: predictionData.price_history?.length || 0,
+      };
+
+      if (rapidApiResults.length > 0) {
+        report.rapidapi_data = {
+          providers_matched: matches
+            .filter((m) => m.provider.category !== "prediction-markets")
+            .map((m) => ({
+              name: m.provider.name,
+              category: m.provider.category,
+            })),
           results: rapidApiResults.map((r) => ({
             provider: r.provider,
             status: r.status,
             data: r.data,
             error: r.error,
           })),
-        },
-        perplexity_research: {
-          queries_run: perplexityResults.queries.length,
-          results: perplexityResults.results.map((r) => ({
-            query: r.query,
-            answer: r.answer,
-            citations: r.citations,
-            error: r.error,
-          })),
-        },
-        research_summary: {
-          data_sources: matches.length + perplexityResults.queries.length,
-          rapidapi_providers: matches.length,
-          perplexity_queries: perplexityResults.queries.length,
-          successful_queries: perplexityResults.results.filter(r => !r.error).length,
-        },
+        };
+      }
+
+      report.perplexity_research = {
+        queries_run: perplexityResults.queries.length,
+        context_aware: !!alertContext,
+        results: perplexityResults.results.map((r) => ({
+          query: r.query,
+          answer: r.answer,
+          citations: r.citations,
+          error: r.error,
+        })),
+      };
+
+      report.research_summary = {
+        data_sources: (rapidApiResults.length > 0 ? matches.length : 0) + perplexityResults.queries.length + 1,
+        rapidapi_providers: rapidApiResults.length > 0 ? matches.filter((m) => m.provider.category !== "prediction-markets").length : 0,
+        perplexity_queries: perplexityResults.queries.length,
+        prediction_market_data: !!(predictionData.related_markets?.length || predictionData.cross_platform),
+        successful_queries: perplexityResults.results.filter(r => !r.error).length,
       };
 
       console.log(JSON.stringify(report, null, 2));

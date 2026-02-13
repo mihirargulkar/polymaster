@@ -40,7 +40,7 @@ export class AlertStore {
     return this.alerts[this.alerts.length - 1].timestamp;
   }
 
-  /** Query alerts with filters */
+  /** Query alerts with filters (including enriched field filters) */
   query(filter: AlertFilter): WhalertAlert[] {
     let results = [...this.alerts];
 
@@ -67,6 +67,28 @@ export class AlertStore {
       );
     }
 
+    if (filter.tags && filter.tags.length > 0) {
+      const tagsLower = filter.tags.map((t) => t.toLowerCase());
+      results = results.filter((a) => {
+        const alertTags = a.market_context?.tags?.map((t) => t.toLowerCase()) || [];
+        return tagsLower.some((t) => alertTags.includes(t));
+      });
+    }
+
+    if (filter.min_win_rate !== undefined) {
+      results = results.filter((a) => {
+        const wr = a.whale_profile?.win_rate;
+        return wr !== undefined && wr !== null && wr >= filter.min_win_rate!;
+      });
+    }
+
+    if (filter.max_leaderboard_rank !== undefined) {
+      results = results.filter((a) => {
+        const rank = a.whale_profile?.leaderboard_rank;
+        return rank !== undefined && rank !== null && rank <= filter.max_leaderboard_rank!;
+      });
+    }
+
     // Most recent first
     results.reverse();
 
@@ -77,21 +99,22 @@ export class AlertStore {
     return results;
   }
 
-  /** Search alerts by text in market_title or outcome */
+  /** Search alerts by text in market_title, outcome, or tags */
   search(query: string, limit: number = 20): WhalertAlert[] {
     const q = query.toLowerCase();
     const results = this.alerts
       .filter(
         (a) =>
           (a.market_title && a.market_title.toLowerCase().includes(q)) ||
-          (a.outcome && a.outcome.toLowerCase().includes(q))
+          (a.outcome && a.outcome.toLowerCase().includes(q)) ||
+          (a.market_context?.tags?.some((t) => t.toLowerCase().includes(q)))
       )
       .reverse()
       .slice(0, limit);
     return results;
   }
 
-  /** Generate aggregate summary stats */
+  /** Generate aggregate summary stats (including enriched data) */
   summarize(): AlertSummary {
     const byPlatform: Record<string, number> = {};
     const byAction: Record<string, number> = {};
@@ -100,6 +123,11 @@ export class AlertStore {
     let repeatActors = 0;
     let heavyActors = 0;
     const seenWallets = new Set<string>();
+
+    let rankSum = 0;
+    let rankCount = 0;
+    let bidDepthSum = 0;
+    let bidDepthCount = 0;
 
     for (const alert of this.alerts) {
       totalVolume += alert.value;
@@ -121,6 +149,19 @@ export class AlertStore {
           if (alert.wallet_activity.is_heavy_actor) heavyActors++;
         }
       }
+
+      // Aggregate enriched data
+      const rank = alert.whale_profile?.leaderboard_rank;
+      if (rank !== undefined && rank !== null) {
+        rankSum += rank;
+        rankCount++;
+      }
+
+      const bidDepth = alert.order_book?.bid_depth_10pct;
+      if (bidDepth !== undefined) {
+        bidDepthSum += bidDepth;
+        bidDepthCount++;
+      }
     }
 
     const topMarkets = Object.entries(marketMap)
@@ -135,6 +176,8 @@ export class AlertStore {
       by_action: byAction,
       top_markets: topMarkets,
       whale_count: { repeat_actors: repeatActors, heavy_actors: heavyActors },
+      avg_whale_rank: rankCount > 0 ? Math.round(rankSum / rankCount) : null,
+      avg_bid_depth: bidDepthCount > 0 ? Math.round(bidDepthSum / bidDepthCount) : null,
       latest_alert_time: this.latestAlertTime,
     };
   }
