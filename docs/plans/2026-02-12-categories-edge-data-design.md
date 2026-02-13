@@ -1,7 +1,7 @@
 # Categories + Edge Data + Storage + Wallet Memory Design
 
 **Date**: 2026-02-12
-**Status**: Implemented (Phases 1-6 complete, Phase 7 in progress)
+**Status**: Complete (all phases implemented)
 **Scope**: Market categories, edge data enrichment, exit detection fixes, SQLite storage, 12h wallet memory, setup wizard overhaul
 
 ---
@@ -209,78 +209,16 @@ No fake exit detection.
 
 ## 4. Updated Webhook Payload
 
-Full payload with new `category`, `subcategory`, and `market_context` fields:
+> **Note:** The full, current webhook payload schema is documented in [`docs/WEBHOOK_REFERENCE.md`](../WEBHOOK_REFERENCE.md). The payload below is a summary.
 
-```json
-{
-  "platform": "Polymarket",
-  "alert_type": "WHALE_ENTRY",
-  "action": "BUY",
-  "category": "crypto",
-  "subcategory": "bitcoin",
-  "value": 50000.0,
-  "price": 0.65,
-  "price_percent": 65,
-  "size": 76923.08,
-  "timestamp": "2026-02-12T18:00:00Z",
-  "market_title": "Bitcoin above 100k by March?",
-  "outcome": "Yes",
-  "wallet_id": "0x742d35Cc6634C0532925a3b844Bc9e7595f2bD",
-  "wallet_activity": {
-    "transactions_last_hour": 3,
-    "transactions_last_day": 5,
-    "total_value_hour": 150000.0,
-    "total_value_day": 380000.0,
-    "is_repeat_actor": true,
-    "is_heavy_actor": true
-  },
-  "market_context": {
-    "yes_price": 0.65,
-    "no_price": 0.35,
-    "spread": 0.01,
-    "volume_24h": 450000.0,
-    "open_interest": 2100000.0,
-    "price_change_24h": 3.2,
-    "liquidity": 180000.0
-  }
-}
-```
+The webhook now includes `market_context`, `whale_profile`, `order_book`, and `top_holders` in addition to the base fields. All new fields are optional and backward-compatible.
 
-For returning whale alerts:
-```json
-{
-  "alert_type": "RETURNING_WHALE",
-  "whale_memory": {
-    "scenario": "doubling_down",
-    "previous_positions": [
-      {
-        "market_title": "Bitcoin above 100k by March?",
-        "outcome": "Yes",
-        "value": 50000.0,
-        "hours_ago": 3.2
-      }
-    ],
-    "total_12h_volume": 180000.0,
-    "total_12h_transactions": 4
-  }
-}
-```
-
-For inferred exits:
-```json
-{
-  "alert_type": "PROBABLE_EXIT",
-  "action": "BUY",
-  "inferred_exit": {
-    "previous_outcome": "Yes",
-    "previous_value": 75000.0,
-    "current_outcome": "No",
-    "current_value": 50000.0
-  }
-}
-```
-
-Backward-compatible — all new fields are additive.
+See [`docs/WEBHOOK_REFERENCE.md`](../WEBHOOK_REFERENCE.md) for:
+- Complete field reference with types and descriptions
+- n8n Telegram/Discord message templates
+- n8n IF node filter examples
+- n8n Code node computed fields (imbalance, whale quality score)
+- curl test commands
 
 ---
 

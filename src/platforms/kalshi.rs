@@ -84,6 +84,16 @@ struct MarketResponse {
 struct MarketData {
     title: Option<String>,
     subtitle: Option<String>,
+    category: Option<String>,
+    #[serde(default)]
+    tags: Vec<String>,
+}
+
+/// Market info including title and native category
+pub struct MarketInfo {
+    pub title: String,
+    pub category: Option<String>,
+    pub tags: Vec<String>,
 }
 
 pub async fn fetch_market_context(ticker: &str) -> Option<crate::alerts::MarketContext> {
@@ -138,6 +148,12 @@ pub async fn fetch_market_context(ticker: &str) -> Option<crate::alerts::MarketC
         .and_then(|v| v.as_f64())
         .unwrap_or(0.0);
 
+    // Extract category and tags from Kalshi market data
+    let tags: Vec<String> = market.get("category")
+        .and_then(|v| v.as_str())
+        .map(|c| vec![c.to_string()])
+        .unwrap_or_default();
+
     Some(crate::alerts::MarketContext {
         yes_price: yes_bid,
         no_price: no_bid,
@@ -146,10 +162,92 @@ pub async fn fetch_market_context(ticker: &str) -> Option<crate::alerts::MarketC
         open_interest,
         price_change_24h,
         liquidity,
+        tags,
     })
 }
 
-pub async fn fetch_market_info(ticker: &str) -> Option<String> {
+/// Fetch order book from Kalshi public API
+pub async fn fetch_order_book(ticker: &str) -> Option<crate::alerts::OrderBookSummary> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .ok()?;
+
+    let url = format!(
+        "https://api.elections.kalshi.com/trade-api/v2/markets/{}/orderbook",
+        ticker
+    );
+
+    let response = client
+        .get(&url)
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .ok()?;
+
+    if !response.status().is_success() {
+        return None;
+    }
+
+    let text = response.text().await.ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let orderbook = parsed.get("orderbook").unwrap_or(&parsed);
+
+    let yes_bids = orderbook.get("yes").and_then(|v| v.as_array());
+    let no_bids = orderbook.get("no").and_then(|v| v.as_array());
+
+    // Kalshi orderbook format: arrays of [price, quantity] for yes and no sides
+    let (best_bid, bid_depth, bid_levels) = if let Some(bids) = yes_bids {
+        let mut best = 0.0f64;
+        let mut depth = 0.0f64;
+        let mut levels = 0u32;
+        for entry in bids {
+            let arr = entry.as_array();
+            if let Some(arr) = arr {
+                let price = arr.first().and_then(|v| v.as_f64()).unwrap_or(0.0) / 100.0;
+                let qty = arr.get(1).and_then(|v| v.as_f64()).unwrap_or(0.0);
+                if price > best { best = price; }
+                depth += price * qty;
+                levels += 1;
+            }
+        }
+        (best, depth, levels)
+    } else {
+        (0.0, 0.0, 0)
+    };
+
+    let (best_ask, ask_depth, ask_levels) = if let Some(asks) = no_bids {
+        let mut best = 1.0f64;
+        let mut depth = 0.0f64;
+        let mut levels = 0u32;
+        for entry in asks {
+            let arr = entry.as_array();
+            if let Some(arr) = arr {
+                let price = arr.first().and_then(|v| v.as_f64()).unwrap_or(0.0) / 100.0;
+                let qty = arr.get(1).and_then(|v| v.as_f64()).unwrap_or(0.0);
+                if price < best { best = price; }
+                depth += price * qty;
+                levels += 1;
+            }
+        }
+        // best_ask for YES side is 1 - best NO bid
+        (1.0 - best, depth, levels)
+    } else {
+        (1.0, 0.0, 0)
+    };
+
+    Some(crate::alerts::OrderBookSummary {
+        best_bid,
+        best_ask,
+        bid_depth_10pct: bid_depth,
+        ask_depth_10pct: ask_depth,
+        bid_levels,
+        ask_levels,
+    })
+}
+
+/// Fetch full market info including native category and tags
+pub async fn fetch_market_info_full(ticker: &str) -> Option<MarketInfo> {
     let client = reqwest::Client::new();
     let url = format!(
         "https://api.elections.kalshi.com/trade-api/v2/markets/{}",
@@ -160,10 +258,13 @@ pub async fn fetch_market_info(ticker: &str) -> Option<String> {
         Ok(response) if response.status().is_success() => {
             if let Ok(text) = response.text().await {
                 if let Ok(market_response) = serde_json::from_str::<MarketResponse>(&text) {
-                    return market_response
-                        .market
-                        .title
-                        .or(market_response.market.subtitle);
+                    let title = market_response.market.title
+                        .or(market_response.market.subtitle)?;
+                    return Some(MarketInfo {
+                        title,
+                        category: market_response.market.category,
+                        tags: market_response.market.tags,
+                    });
                 }
             }
         }

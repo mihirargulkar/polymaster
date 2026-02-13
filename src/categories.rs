@@ -78,6 +78,42 @@ impl CategoryRegistry {
         Self { keywords }
     }
 
+    /// Map Kalshi's native category names to our internal category keys
+    fn native_to_internal(native_category: &str) -> Option<&'static str> {
+        let lower = native_category.to_lowercase();
+        match lower.as_str() {
+            "sports" | "nba" | "nfl" | "mlb" | "nhl" | "soccer" | "golf" | "mma" | "tennis"
+            | "college-football" | "college-basketball" | "ncaa" => Some("sports"),
+            "politics" | "elections" | "us-elections" | "congress" => Some("politics"),
+            "economics" | "economy" | "fed" | "inflation" | "jobs" => Some("economics"),
+            "crypto" | "cryptocurrency" | "bitcoin" | "ethereum" => Some("crypto"),
+            "finance" | "stocks" | "markets" | "indices" => Some("finance"),
+            "weather" | "climate" | "temperature" => Some("weather"),
+            "tech" | "technology" | "ai" => Some("tech"),
+            "culture" | "entertainment" | "awards" => Some("culture"),
+            "world" | "geopolitics" | "international" => Some("world"),
+            "health" | "healthcare" | "fda" => Some("health"),
+            _ => None,
+        }
+    }
+
+    /// Check if a native Kalshi category matches the user's selection
+    pub fn matches_native_category(&self, native_category: &str, selected: &[String]) -> bool {
+        if selected.iter().any(|s| s == "all") {
+            return true;
+        }
+
+        if let Some(internal) = Self::native_to_internal(native_category) {
+            for sel in selected {
+                if sel == internal || sel.starts_with(&format!("{}:", internal)) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
     /// Check if a market title matches the user's selected categories
     /// Returns (category, subcategory) if matched, None if not in user's selection
     pub fn matches_selection(&self, market_title: &str, selected: &[String]) -> Option<(String, String)> {

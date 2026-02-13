@@ -5,6 +5,8 @@ mod config;
 mod db;
 mod platforms;
 mod types;
+mod whale_profile;
+mod ws;
 
 use clap::{Parser, Subcommand};
 

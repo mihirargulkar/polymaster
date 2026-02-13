@@ -1,8 +1,9 @@
 use colored::*;
 
-use crate::alerts::MarketContext;
+use crate::alerts::{MarketContext, OrderBookSummary, TopHoldersSummary};
 use crate::platforms::{kalshi, polymarket};
 use crate::types::{self, WhaleReturnScenario};
+use crate::whale_profile::WhaleProfile;
 
 use super::anomaly;
 use super::sound;
@@ -44,6 +45,9 @@ pub fn print_market_context(ctx: &MarketContext) {
     }
     if ctx.liquidity > 0.0 {
         println!("Liquidity:     ${:.0}", ctx.liquidity);
+    }
+    if !ctx.tags.is_empty() {
+        println!("Tags:          {}", ctx.tags.join(", ").dimmed());
     }
 }
 
@@ -402,6 +406,121 @@ pub fn print_returning_whale(scenario: &WhaleReturnScenario, platform: &str) {
                 );
             }
         }
+    }
+}
+
+pub fn print_order_book(ob: &OrderBookSummary) {
+    println!();
+    println!("{}", "[ORDER BOOK]".bright_blue().bold());
+    println!(
+        "Best Bid:   ${:.4}  |  Best Ask: ${:.4}  |  Spread: ${:.4}",
+        ob.best_bid,
+        ob.best_ask,
+        (ob.best_ask - ob.best_bid).abs()
+    );
+    println!(
+        "Bid Depth:  ${:.0} ({} levels)  |  Ask Depth: ${:.0} ({} levels)",
+        ob.bid_depth_10pct, ob.bid_levels, ob.ask_depth_10pct, ob.ask_levels
+    );
+    let imbalance = if (ob.bid_depth_10pct + ob.ask_depth_10pct) > 0.0 {
+        ob.bid_depth_10pct / (ob.bid_depth_10pct + ob.ask_depth_10pct)
+    } else {
+        0.5
+    };
+    let imbalance_label = if imbalance > 0.65 {
+        "strong bid pressure".bright_green()
+    } else if imbalance > 0.55 {
+        "moderate bid pressure".green()
+    } else if imbalance < 0.35 {
+        "strong ask pressure".bright_red()
+    } else if imbalance < 0.45 {
+        "moderate ask pressure".red()
+    } else {
+        "balanced".yellow()
+    };
+    println!("Imbalance:  {:.0}% bid / {:.0}% ask ({})", imbalance * 100.0, (1.0 - imbalance) * 100.0, imbalance_label);
+}
+
+pub fn print_top_holders(th: &TopHoldersSummary) {
+    if th.top_holders.is_empty() {
+        return;
+    }
+    println!();
+    println!("{}", "[TOP HOLDERS]".bright_magenta().bold());
+    for (i, holder) in th.top_holders.iter().enumerate() {
+        let short_wallet = if holder.wallet.len() > 14 {
+            format!("{}...{}", &holder.wallet[..6], &holder.wallet[holder.wallet.len() - 4..])
+        } else {
+            holder.wallet.clone()
+        };
+        let pct = if th.total_shares > 0.0 {
+            (holder.shares / th.total_shares) * 100.0
+        } else {
+            0.0
+        };
+        println!(
+            "  #{}: {} — {:.0} shares ({:.1}%)",
+            i + 1, short_wallet.dimmed(), holder.shares, pct
+        );
+    }
+    let top5_shares: f64 = th.top_holders.iter().map(|h| h.shares).sum();
+    let top5_pct = if th.total_shares > 0.0 { (top5_shares / th.total_shares) * 100.0 } else { 0.0 };
+    println!("  Top {} control {:.1}% of shares", th.top_holders.len(), top5_pct);
+}
+
+pub fn print_whale_profile(profile: &WhaleProfile) {
+    println!();
+    println!("{}", "[WHALE PROFILE]".bright_green().bold());
+
+    if let Some(rank) = profile.leaderboard_rank {
+        if rank > 0 {
+            println!(
+                "Leaderboard:  #{} {}",
+                rank,
+                if rank <= 10 {
+                    "(TOP 10)".bright_red().bold()
+                } else if rank <= 50 {
+                    "(TOP 50)".bright_yellow().bold()
+                } else if rank <= 100 {
+                    "(TOP 100)".yellow().bold()
+                } else {
+                    format!("(TOP {})", rank).dimmed().bold()
+                }
+            );
+        }
+    }
+
+    if let Some(profit) = profile.leaderboard_profit {
+        let profit_color = if profit >= 0.0 {
+            format!("+${:.0}", profit).bright_green()
+        } else {
+            format!("-${:.0}", profit.abs()).bright_red()
+        };
+        println!("Profit:       {}", profit_color);
+    }
+
+    if let Some(value) = profile.portfolio_value {
+        println!("Portfolio:    ${:.0}", value);
+    }
+
+    if let Some(positions) = profile.positions_count {
+        println!("Open Pos:     {}", positions);
+    }
+
+    if let Some(win_rate) = profile.win_rate {
+        let wr_pct = win_rate * 100.0;
+        let wr_color = if wr_pct >= 60.0 {
+            format!("{:.1}%", wr_pct).bright_green()
+        } else if wr_pct >= 50.0 {
+            format!("{:.1}%", wr_pct).yellow()
+        } else {
+            format!("{:.1}%", wr_pct).bright_red()
+        };
+        println!("Win Rate:     {}", wr_color);
+    }
+
+    if let Some(markets) = profile.markets_traded {
+        println!("Markets:      {}", markets);
     }
 }
 
