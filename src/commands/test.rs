@@ -26,7 +26,7 @@ pub async fn test_sound() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-pub async fn test_webhook() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn test_webhook(conn: &rusqlite::Connection) -> Result<(), Box<dyn std::error::Error>> {
     println!("{}", "TESTING WEBHOOK".bright_cyan().bold());
     println!();
 
@@ -64,27 +64,38 @@ pub async fn test_webhook() -> Result<(), Box<dyn std::error::Error>> {
         is_heavy_actor: true,
     };
 
-    // Test BUY alert
+    let test_whale = crate::whale_profile::WhaleProfile {
+        wallet_id: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb".to_string(),
+        portfolio_value: Some(1500000.0),
+        positions_count: Some(12),
+        leaderboard_rank: Some(5),
+        leaderboard_profit: Some(450000.0),
+        win_rate: Some(0.82),
+        markets_traded: Some(85),
+    };
+
+    // Test BUY alert (HIGH TIER)
     let timestamp = chrono::Utc::now().to_rfc3339();
     let buy_alert = AlertData {
         platform: "Polymarket",
-        market_title: Some("Will Bitcoin reach $100k by end of 2026?"),
+        market_title: Some("yes Michigan St.,yes Saint Peter's,yes Harvard wins by over 5.5 Points,no Iona wins by over 5.5 Points,no Boise St. wins by over 9.5 Points"),
         outcome: Some("Yes"),
         side: "BUY",
-        value: 50000.0,
+        value: 250000.0,
         price: 0.65,
-        size: 76923.08,
+        size: 384615.38,
         timestamp: &timestamp,
         wallet_id: Some("0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb"),
         wallet_activity: Some(&test_activity),
         market_context: None,
-        whale_profile: None,
+        whale_profile: Some(&test_whale),
         order_book: None,
         top_holders: None,
     };
     webhook::send_webhook_alert(&webhook_url, &buy_alert).await;
+    crate::alerts::history::log_alert(&buy_alert, conn);
 
-    println!("Test BUY alert sent!");
+    println!("High-Tier Test BUY alert sent and logged!");
 
     // Test SELL alert
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
@@ -107,8 +118,9 @@ pub async fn test_webhook() -> Result<(), Box<dyn std::error::Error>> {
         top_holders: None,
     };
     webhook::send_webhook_alert(&webhook_url, &sell_alert).await;
+    crate::alerts::history::log_alert(&sell_alert, conn);
 
-    println!("Test SELL alert sent!");
+    println!("Test SELL alert sent and logged!");
     println!();
     println!("{}", "Test webhooks sent!".bright_green());
     println!("Check your n8n workflow to see if it received the data.");

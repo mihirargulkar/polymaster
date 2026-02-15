@@ -15,13 +15,19 @@
  */
 
 import * as fs from "fs";
+import * as path from "path";
+import * as readline from "node:readline/promises";
+import { stdin as input, stdout as output } from "node:process";
+import { fileURLToPath } from "url";
 import { AlertStore } from "./watcher/alert-store.js";
 import { ProviderRegistry } from "./providers/registry.js";
 import { fetchAutoFromProvider } from "./providers/fetcher.js";
 import { queryPerplexity, runResearchQueries, generateResearchQueries, generateContextQueries, buildResearchSignal } from "./providers/perplexity.js";
+import { runFreeResearch, checkMarketEquivalence } from "./providers/free-research.js";
 import { fetchPredictionMarketData } from "./providers/prediction-fetcher.js";
 import { scoreAlert, passesPreferences } from "./scoring/scorer.js";
 import { loadEnv } from "./util/env.js";
+import { placeKalshiOrder, getKalshiBalance, searchKalshiMarkets } from "./tools/kalshi-execution.js";
 import type { WhalertAlert, AlertPreferences } from "./util/types.js";
 
 interface CliOptions {
@@ -133,6 +139,10 @@ COMMANDS:
   research <market_title>    Full research: RapidAPI + Perplexity + prediction markets
   score <alert_json>         Score a whale alert JSON, return tier + factors
   preferences show           Show alert preferences schema and example
+  balance                    Get Kalshi account balance
+  buy <ticker> <qty> [px]    Place Kalshi buy (px in cents for limit)
+  sell <ticker> <qty> [px]   Place Kalshi sell (px in cents for limit)
+  settle-shadow              Reconcile shadow trades with real outcomes
 
 ALERT OPTIONS:
   --limit=N, -l N            Max alerts to return (default: 20)
@@ -171,7 +181,15 @@ async function main(): Promise<void> {
 
   // Initialize store and registry
   const store = new AlertStore();
-  store.loadFromFile(env.historyPath);
+
+  // Try to load history from Rust binary first
+  const binaryPath = path.join(fileURLToPath(new URL(".", import.meta.url)), "../../target/release/wwatcher");
+  if (fs.existsSync(binaryPath)) {
+    store.loadFromBinary(binaryPath);
+  } else {
+    // Fallback to legacy JSONL if binary not found
+    store.loadFromFile(env.historyPath);
+  }
 
   const registry = new ProviderRegistry(env.providersConfigPath);
 
@@ -414,10 +432,10 @@ async function main(): Promise<void> {
         process.exit(1);
       }
 
-      if (!env.perplexityApiKey) {
+      if (!env.perplexityApiKey && !(env.tavilyApiKey && env.groqApiKey)) {
         console.log(JSON.stringify({
-          error: "PERPLEXITY_API_KEY not configured",
-          help: "Research requires PERPLEXITY_API_KEY in integration/.env",
+          error: "No research API keys configured",
+          help: "Research requires either PERPLEXITY_API_KEY OR (TAVILY_API_KEY and GROQ_API_KEY) in integration/.env",
         }, null, 2));
         process.exit(1);
       }
@@ -495,12 +513,22 @@ async function main(): Promise<void> {
           tags: alertContext.market_context?.tags,
         });
 
-        perplexityResults = await runResearchQueries(
-          marketTitle,
-          env.perplexityApiKey!,
-          options.category,
-          contextQueries
-        );
+        if (env.perplexityApiKey) {
+          perplexityResults = await runResearchQueries(
+            marketTitle,
+            env.perplexityApiKey,
+            options.category,
+            contextQueries
+          );
+        } else {
+          perplexityResults = await runFreeResearch(
+            marketTitle,
+            env.tavilyApiKey!,
+            env.groqApiKey!,
+            options.category,
+            contextQueries
+          );
+        }
 
         // Build structured signal
         signal = buildResearchSignal(perplexityResults.results, alertScore, {
@@ -517,20 +545,57 @@ async function main(): Promise<void> {
         // Legacy path: generic research queries
         const numQueries = options.queries || 5;
         const queries = generateResearchQueries(marketTitle, options.category).slice(0, numQueries);
-        perplexityResults = await runResearchQueries(
-          marketTitle,
-          env.perplexityApiKey!,
-          options.category,
-          queries
-        );
+        if (env.perplexityApiKey) {
+          perplexityResults = await runResearchQueries(
+            marketTitle,
+            env.perplexityApiKey,
+            options.category,
+            queries
+          );
+        } else {
+          perplexityResults = await runFreeResearch(
+            marketTitle,
+            env.tavilyApiKey!,
+            env.groqApiKey!,
+            options.category,
+            queries
+          );
+        }
       }
 
-      // Step 4: Compile research report
+      // Step 4: Cross-Platform Equivalence (if Polymarket alert)
+      let equivalence = null;
+      if (alertContext && alertContext.platform.toLowerCase() === "polymarket" && env.groqApiKey) {
+        try {
+          // Find best matching Kalshi market
+          const kalshiMatches = await searchKalshiMarkets(marketTitle, 1);
+          if (kalshiMatches.length > 0) {
+            const bestMatch = kalshiMatches[0];
+            equivalence = await checkMarketEquivalence(
+              { title: marketTitle },
+              { title: bestMatch.title, subtitle: bestMatch.subtitle },
+              env.groqApiKey!
+            );
+            // Attach the ticker for the quick trade command if equivalent
+            if (equivalence.isEquivalent) {
+              (equivalence as any).target_ticker = bestMatch.ticker;
+            }
+          }
+        } catch (err) {
+          console.error("Warning: Equivalence check failed:", err);
+        }
+      }
+
+      // Step 5: Compile research report
       const report: any = {
         market_title: marketTitle,
         category: options.category || (matches[0]?.provider.category ?? "general"),
         timestamp: new Date().toISOString(),
       };
+
+      if (equivalence) {
+        report.cross_platform_equivalence = equivalence;
+      }
 
       if (alertScore) {
         report.alert_score = alertScore;
@@ -583,6 +648,158 @@ async function main(): Promise<void> {
       };
 
       console.log(JSON.stringify(report, null, 2));
+      break;
+    }
+
+    case "balance": {
+      try {
+        const balance = await getKalshiBalance(env);
+        console.log(JSON.stringify({ platform: "kalshi", balance, currency: "USD" }, null, 2));
+      } catch (err) {
+        console.error(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        process.exit(1);
+      }
+      break;
+    }
+
+    case "search-kalshi": {
+      const query = positional.join(" ");
+      if (!query) {
+        console.error(JSON.stringify({ error: "Usage: wwatcher-ai search-kalshi <query>" }));
+        process.exit(1);
+      }
+      try {
+        const results = await searchKalshiMarkets(query);
+        console.log(JSON.stringify(results, null, 2));
+      } catch (err) {
+        console.error(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        process.exit(1);
+      }
+      break;
+    }
+
+    case "trade": {
+      // Interactive Trade Cockpit
+      const recentAlerts = store.query({ limit: 5 });
+      if (recentAlerts.length === 0) {
+        console.log("No recent alerts found in history. Try 'wwatcher watch' first.");
+        break;
+      }
+
+      console.log("\n--- 🚀 TRADE COCKPIT ---");
+      recentAlerts.forEach((a, i) => {
+        console.log(`[${i + 1}] ${a.platform} | ${a.action} ${a.outcome} | $${Number(a.value).toLocaleString()} | ${a.market_title}`);
+      });
+
+      const rl = readline.createInterface({ input, output });
+      try {
+        const choice = await rl.question("\nSelect alert to trade [1-5]: ");
+        const idx = parseInt(choice) - 1;
+
+        if (isNaN(idx) || idx < 0 || idx >= recentAlerts.length) {
+          console.log("Invalid selection.");
+          break;
+        }
+
+        const alert = recentAlerts[idx];
+        console.log(`\nSelected: ${alert.market_title}`);
+
+        // Ensure Kalshi ticker resolution
+        let ticker = alert.market_title || "";
+        if (alert.platform === "Kalshi") {
+          console.log("Resolving ticker...");
+          const searchResults = await searchKalshiMarkets(ticker, 1);
+          if (searchResults.length > 0) {
+            ticker = searchResults[0].ticker;
+            console.log(`Resolved to: ${ticker}`);
+          }
+        }
+
+        const qtyStr = await rl.question("Quantity [default 10]: ");
+        const count = parseInt(qtyStr) || 10;
+
+        const confirm = await rl.question(`Confirm ${alert.action} ${count} shares of ${ticker}? [y/N]: `);
+        if (confirm.toLowerCase() !== "y") {
+          console.log("Aborted.");
+          break;
+        }
+
+        if (alert.platform === "Kalshi") {
+          const result = await placeKalshiOrder(env, {
+            ticker,
+            action: alert.action.toLowerCase() as "buy" | "sell",
+            side: "yes",
+            count,
+            type: "market"
+          });
+          console.log("Trade Success!", JSON.stringify(result, null, 2));
+        } else {
+          console.log("Polymarket execution not yet implemented in CLI. Use Kalshi for now.");
+        }
+      } catch (err) {
+        console.error("Error during trade:", err);
+      } finally {
+        rl.close();
+      }
+      break;
+    }
+
+    case "buy":
+    case "sell": {
+      let ticker = positional[0];
+      const count = parseInt(positional[1], 10);
+      const price = parseInt(positional[2], 10); // Cents
+
+      if (!ticker || isNaN(count)) {
+        console.error(JSON.stringify({ error: `Usage: wwatcher-ai ${command} <ticker_or_search> <count> [price_cents]` }));
+        process.exit(1);
+      }
+
+      // If ticker looks like a search query (contains spaces or no dashes), try to resolve it
+      if (ticker.includes(" ") || (!ticker.includes("-") && ticker.length > 5)) {
+        console.error(JSON.stringify({ status: "searching", query: ticker }));
+        try {
+          const searchResults = await searchKalshiMarkets(ticker, 1);
+          if (searchResults.length === 0) {
+            console.error(JSON.stringify({ error: `No market found for query: ${ticker}` }));
+            process.exit(1);
+          }
+          ticker = searchResults[0].ticker;
+          console.error(JSON.stringify({ status: "resolved", ticker, title: searchResults[0].title }));
+        } catch (err) {
+          console.error(JSON.stringify({ error: "Failed to resolve market search" }));
+          process.exit(1);
+        }
+      }
+
+      try {
+        const result = await placeKalshiOrder(env, {
+          ticker,
+          action: command as "buy" | "sell",
+          side: "yes",
+          count,
+          type: price ? "limit" : "market",
+          ...(price && { price }),
+        });
+        console.log(JSON.stringify({ status: "success", result, ticker }, null, 2));
+      } catch (err: any) {
+        console.error(JSON.stringify({
+          error: err.response?.data?.error?.message || err.message,
+          details: err.response?.data
+        }));
+        process.exit(1);
+      }
+      break;
+    }
+
+    case "settle-shadow": {
+      const { ShadowAutopilot } = await import("./autopilot/shadow-mode.js");
+      const bot = new ShadowAutopilot(env);
+      console.log("🔍 Reconciling shadow trades with market outcomes...");
+      await bot.reconcile();
+      const status = bot.getStatus();
+      console.log("✅ Settlement complete.");
+      console.log(JSON.stringify(status, null, 2));
       break;
     }
 

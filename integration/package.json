@@ -12,10 +12,13 @@
     "start": "node dist/index.js",
     "start:mcp": "node dist/index.js",
     "cli": "node dist/cli.js",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "shadow": "node dist/index.js --mode=shadow",
+    "settle-shadow": "node dist/cli.js settle-shadow"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
+    "axios": "^1.13.5",
     "chokidar": "^4.0.0",
     "dotenv": "^16.4.0",
     "zod": "^3.24.0"

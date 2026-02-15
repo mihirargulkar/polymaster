@@ -61,8 +61,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize database for commands that need it
     let conn = db::open_db()?;
 
-    // Migrate old JSONL history on first run
-    db::migrate_jsonl_if_exists(&conn);
+    // Migrate old JSONL history on first run (Disabled to keep JSONL live for autopilot)
+    // db::migrate_jsonl_if_exists(&conn);
 
     match cli.command {
         Commands::Setup => {
@@ -88,7 +88,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::test::test_sound().await?;
         }
         Commands::TestWebhook => {
-            commands::test::test_webhook().await?;
+            commands::test::test_webhook(&conn).await?;
         }
     }
 

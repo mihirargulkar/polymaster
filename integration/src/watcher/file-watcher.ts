@@ -15,7 +15,7 @@ export class FileWatcher {
     private filePath: string,
     private store: AlertStore,
     private onNewAlert?: (alert: WhalertAlert) => void
-  ) {}
+  ) { }
 
   /** Start watching. Sets offset to current file end so we only get new alerts. */
   start(): void {
@@ -27,10 +27,15 @@ export class FileWatcher {
 
     this.watcher = watch(this.filePath, {
       persistent: true,
+      usePolling: true,
+      interval: 100,
       awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 50 },
     });
 
+    console.log(`👀 FileWatcher started for: ${this.filePath}`);
+
     this.watcher.on("change", () => {
+      console.log(`📝 File changed: ${this.filePath}`);
       this.readNewLines();
     });
 

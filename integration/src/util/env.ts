@@ -10,6 +10,10 @@ export interface EnvConfig {
   historyPath: string;
   rapidApiKey: string | undefined;
   perplexityApiKey: string | undefined;
+  tavilyApiKey: string | undefined;
+  groqApiKey: string | undefined;
+  kalshiApiKeyId: string | undefined;
+  kalshiPrivateKey: string | undefined;
   providersConfigPath: string;
 }
 
@@ -28,18 +32,22 @@ export function loadEnv(): EnvConfig {
 
   const historyPath = resolveHomePath(
     process.env.WWATCHER_HISTORY_PATH ||
-      path.join(homeDir, ".config", "wwatcher", "alert_history.jsonl")
+    path.join(homeDir, ".config", "wwatcher", "alert_history.jsonl")
   );
 
   const providersConfigPath = resolveHomePath(
     process.env.PROVIDERS_CONFIG ||
-      path.join(integrationDir, "providers")
+    path.join(integrationDir, "providers")
   );
 
   return {
     historyPath,
     rapidApiKey: process.env.RAPIDAPI_KEY || undefined,
     perplexityApiKey: process.env.PERPLEXITY_API_KEY || undefined,
+    tavilyApiKey: process.env.TAVILY_API_KEY || undefined,
+    groqApiKey: process.env.GROQ_API_KEY || undefined,
+    kalshiApiKeyId: process.env.KALSHI_API_KEY_ID || undefined,
+    kalshiPrivateKey: process.env.KALSHI_PRIVATE_KEY || undefined,
     providersConfigPath,
   };
 }

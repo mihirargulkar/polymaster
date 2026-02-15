@@ -1,36 +1,33 @@
+use std::fs::OpenOptions;
+use std::io::Write;
 use colored::*;
 use rusqlite::Connection;
 
 use super::AlertData;
 use crate::db;
 
-/// Log an alert to the SQLite database
+/// Log an alert to the SQLite database and JSONL file
 pub fn log_alert(alert: &AlertData, conn: &Connection) {
-    let wallet_activity_json = alert.wallet_activity.map(|wa| {
-        serde_json::json!({
-            "transactions_last_hour": wa.transactions_last_hour,
-            "transactions_last_day": wa.transactions_last_day,
-            "total_value_hour": wa.total_value_hour,
-            "total_value_day": wa.total_value_day,
-            "is_repeat_actor": wa.is_repeat_actor,
-            "is_heavy_actor": wa.is_heavy_actor,
-        })
-        .to_string()
-    });
+    let alert_json = super::build_alert_payload(alert, false);
 
-    let market_context_json = alert.market_context.map(|ctx| {
-        serde_json::json!({
-            "yes_price": ctx.yes_price,
-            "no_price": ctx.no_price,
-            "spread": ctx.spread,
-            "volume_24h": ctx.volume_24h,
-            "open_interest": ctx.open_interest,
-            "price_change_24h": ctx.price_change_24h,
-            "liquidity": ctx.liquidity,
-        })
-        .to_string()
-    });
+    let wallet_activity_json = alert_json.get("wallet_activity").map(|v| v.to_string());
+    let market_context_json = alert_json.get("market_context").map(|v| v.to_string());
 
+    // JSONL Logging
+    if let Some(config_dir) = dirs::config_dir() {
+        let jsonl_path = config_dir.join("wwatcher").join("alert_history.jsonl");
+        if let Ok(mut file) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&jsonl_path)
+        {
+            if let Ok(line) = serde_json::to_string(&alert_json) {
+                let _ = writeln!(file, "{}", line);
+            }
+        }
+    }
+
+    // Database Logging
     db::insert_alert(
         conn,
         alert.platform,

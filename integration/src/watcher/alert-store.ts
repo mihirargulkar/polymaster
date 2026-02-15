@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import { execSync } from "node:child_process";
 import type { WhalertAlert, AlertFilter, AlertSummary } from "../util/types.js";
 
 /**
@@ -22,6 +23,20 @@ export class AlertStore {
       } catch {
         // Skip malformed lines
       }
+    }
+  }
+
+  /** Load history from the Rust binary's history command */
+  loadFromBinary(binaryPath: string, limit: number = 100): void {
+    try {
+      // Use the binary to get JSON output of recent alerts
+      const output = execSync(`${binaryPath} history --json --limit ${limit}`, { encoding: "utf8" });
+      const alerts = JSON.parse(output) as WhalertAlert[];
+      if (Array.isArray(alerts)) {
+        this.alerts = alerts.reverse(); // Store chronologically for consistency with addAlert
+      }
+    } catch (e) {
+      console.error("Warning: Failed to load history from binary:", e instanceof Error ? e.message : String(e));
     }
   }
 
