@@ -407,4 +407,68 @@ KalshiMarketFeed::matchMarkets(const std::vector<Market> &poly_markets,
   return pairs;
 }
 
+// ── Fetch Order Book ────────────────────────────────────────────────
+OrderBook KalshiMarketFeed::fetchOrderBook(const std::string &ticker) {
+  OrderBook book;
+  book.token_id = ticker;
+
+  try {
+    // Correct endpoint for Kalshi v2 orderbook
+    std::string url = "https://api.elections.kalshi.com/trade-api/v2/markets/" +
+                      ticker + "/orderbook";
+    auto raw = httpGet(url);
+    auto data = json::parse(raw);
+
+    if (data.contains("order_book")) {
+      auto ob = data["order_book"];
+      // Kalshi "yes" side asks/bids
+      if (ob.contains("yes")) {
+        // Check for bids/asks inside "yes"? Or is "yes" an array?
+        // Usually it's "yes": [[price, qty], ... ] which implies Bids on Yes?
+        // No, usually "order_book" -> "bids": [...], "asks": [...]
+        // Let's assume standard structure:
+        // "order_book": { "bids": [...], "asks": [...] }
+      }
+
+      auto processLevel = [&](const json &arr,
+                              std::vector<OrderBookLevel> &levels) {
+        for (auto &el : arr) {
+          if (el.is_array() && el.size() >= 2) {
+            double price_cents = el[0].get<double>();
+            double count = el[1].get<double>();
+            levels.push_back({price_cents / 100.0, count});
+          }
+        }
+      };
+
+      if (ob.contains("bids"))
+        processLevel(ob["bids"], book.bids);
+      if (ob.contains("asks"))
+        processLevel(ob["asks"], book.asks);
+    }
+
+    // Fallback: if data is directly the orderbook
+    else if (data.contains("bids") || data.contains("asks")) {
+      auto processLevel = [&](const json &arr,
+                              std::vector<OrderBookLevel> &levels) {
+        for (auto &el : arr) {
+          if (el.is_array() && el.size() >= 2) {
+            double price_cents = el[0].get<double>();
+            double count = el[1].get<double>();
+            levels.push_back({price_cents / 100.0, count});
+          }
+        }
+      };
+      if (data.contains("bids"))
+        processLevel(data["bids"], book.bids);
+      if (data.contains("asks"))
+        processLevel(data["asks"], book.asks);
+    }
+
+  } catch (const std::exception &e) {
+    spdlog::warn("[Kalshi] OB fetch failed for {}: {}", ticker, e.what());
+  }
+  return book;
+}
+
 } // namespace arbi

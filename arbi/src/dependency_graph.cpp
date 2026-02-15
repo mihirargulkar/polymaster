@@ -79,54 +79,55 @@ std::vector<std::pair<std::string, Relation>> DependencyGraph::classifyBatch(
          << "- INDEPENDENT (no logical dependency)\n\n"
          << "Pairs:\n";
 
-  prompt << i << ". A: \"" << pairs[i].first.question << "\" vs B: \""
-         << pairs[i].second.question << "\"\n";
-}
-prompt << "\nFinal Answer:\n";
-
-try {
-  auto response = callGroq(prompt.str());
-
-  // Parse response line by line
-  std::istringstream stream(response);
-  std::string line;
-  while (std::getline(stream, line)) {
-    // Trim
-    while (!line.empty() && (line.back() == '\n' || line.back() == '\r'))
-      line.pop_back();
-
-    auto sep = line.find('|');
-    if (sep == std::string::npos)
-      continue;
-
-    std::string idx_str = line.substr(0, sep);
-    std::string rel_str = line.substr(sep + 1);
-
-    // Remove whitespace
-    idx_str.erase(0, idx_str.find_first_not_of(" \t"));
-    rel_str.erase(0, rel_str.find_first_not_of(" \t"));
-
-    Relation rel = Relation::INDEPENDENT;
-    if (rel_str.find("IMPLIES") != std::string::npos)
-      rel = Relation::IMPLIES;
-    else if (rel_str.find("MUTEX") != std::string::npos)
-      rel = Relation::MUTEX;
-
-    try {
-      size_t idx = std::stoul(idx_str);
-      if (idx < pairs.size()) {
-        std::string key = pairs[idx].first.condition_id + ":" +
-                          pairs[idx].second.condition_id;
-        results.push_back({key, rel});
-      }
-    } catch (...) {
-    }
+  for (size_t i = 0; i < pairs.size(); i++) {
+    prompt << i << ". A: \"" << pairs[i].first.question << "\" vs B: \""
+           << pairs[i].second.question << "\"\n";
   }
-} catch (const std::exception &e) {
-  spdlog::error("[DepGraph] Local LLM classification failed: {}", e.what());
-}
+  prompt << "\nFinal Answer:\n";
 
-return results;
+  try {
+    auto response = callGroq(prompt.str());
+
+    // Parse response line by line
+    std::istringstream stream(response);
+    std::string line;
+    while (std::getline(stream, line)) {
+      // Trim
+      while (!line.empty() && (line.back() == '\n' || line.back() == '\r'))
+        line.pop_back();
+
+      auto sep = line.find('|');
+      if (sep == std::string::npos)
+        continue;
+
+      std::string idx_str = line.substr(0, sep);
+      std::string rel_str = line.substr(sep + 1);
+
+      // Remove whitespace
+      idx_str.erase(0, idx_str.find_first_not_of(" \t"));
+      rel_str.erase(0, rel_str.find_first_not_of(" \t"));
+
+      Relation rel = Relation::INDEPENDENT;
+      if (rel_str.find("IMPLIES") != std::string::npos)
+        rel = Relation::IMPLIES;
+      else if (rel_str.find("MUTEX") != std::string::npos)
+        rel = Relation::MUTEX;
+
+      try {
+        size_t idx = std::stoul(idx_str);
+        if (idx < pairs.size()) {
+          std::string key = pairs[idx].first.condition_id + ":" +
+                            pairs[idx].second.condition_id;
+          results.push_back({key, rel});
+        }
+      } catch (...) {
+      }
+    }
+  } catch (const std::exception &e) {
+    spdlog::error("[DepGraph] Local LLM classification failed: {}", e.what());
+  }
+
+  return results;
 }
 
 // ── Discover dependencies ────────────────────────────────────────────
@@ -168,8 +169,8 @@ void DependencyGraph::startAsyncDiscovery(const std::vector<Market> &markets) {
 
   discovery_task_ = std::async(std::launch::async, [this, markets_copy]() {
     try {
-      spdlog::info("[DepGraph] Background thread running for {} markets",
-                   markets_copy.size());
+      // spdlog::info("[DepGraph] Background thread running for {} markets",
+      // markets_copy.size());
 
       // 1. Identify pairs NOT in cache
       std::vector<std::pair<Market, Market>> new_pairs;
@@ -214,13 +215,13 @@ void DependencyGraph::startAsyncDiscovery(const std::vector<Market> &markets) {
         for (const auto &res : results) {
           cache_[res.first] = res.second;
           if (res.second != Relation::INDEPENDENT) {
-            spdlog::info(
+            spdlog::debug(
                 "[DepGraph] Background: Found new dependency: {} -> {}",
                 res.first, (int)res.second);
           }
         }
       }
-      spdlog::info("[DepGraph] Background discovery complete.");
+      // spdlog::info("[DepGraph] Background discovery complete.");
 
     } catch (const std::exception &e) {
       spdlog::error("[DepGraph] Background error: {}", e.what());

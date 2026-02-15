@@ -114,10 +114,10 @@ int main(int argc, char *argv[]) {
   spdlog::info("FW iterations: {}", cfg.fw_max_iters);
   spdlog::info("Groq API: {}", cfg.groq_api_key.empty() ? "❌ missing" : "✅");
 
-  if (cfg.groq_api_key.empty()) {
-    spdlog::error("GROQ_API_KEY not set. Required for dependency discovery.");
-    return 1;
-  }
+  // if (cfg.groq_api_key.empty()) {
+  //   spdlog::error("GROQ_API_KEY not set. Required for dependency
+  //   discovery."); return 1;
+  // }
 
   if (cfg.live_mode && cfg.polymarket_api_key.empty()) {
     spdlog::error("POLY_API_KEY not set. Required for live trading.");
@@ -130,7 +130,8 @@ int main(int argc, char *argv[]) {
   MarginalPolytope polytope;
   FrankWolfe fw;
   ExecutionEngine exec(feed, cfg);
-  CrossExchangeExecution crossExec(feed, *kalshiMarketFeed, depGraph, cfg);
+  // CrossExchangeExecution - managed dynamically due to optional dependency
+  std::unique_ptr<CrossExchangeExecution> crossExec;
   Logger logger("logs");
 
   // ── WebSocket Integration ────────────────────────────────────────
@@ -153,6 +154,9 @@ int main(int argc, char *argv[]) {
     kalshiFeed.setup(k_key_id, k_priv_key);
     kalshiFeed.connect();
     kalshiMarketFeed = std::make_unique<KalshiMarketFeed>(k_key_id, k_priv_key);
+  } else if (!cfg.live_mode) {
+    spdlog::warn("Kalshi credentials missing, using DUMMY for paper mode.");
+    kalshiMarketFeed = std::make_unique<KalshiMarketFeed>("DUMMY", "DUMMY_KEY");
   } else {
     spdlog::warn("Kalshi credentials not found in env, skipping Kalshi feed.");
   }
@@ -181,7 +185,7 @@ int main(int argc, char *argv[]) {
       // ── Step 1: Fetch/Refresh Markets (Periodic) ────────────────
       if (markets.empty() ||
           (cycle_start - last_market_fetch > MARKET_REFRESH_INTERVAL)) {
-        spdlog::info("Refreshing markets list via HTTP...");
+        // spdlog::info("Refreshing markets list via HTTP...");
         auto new_markets = feed.fetchMarkets();
         last_market_fetch = cycle_start;
 
@@ -209,11 +213,16 @@ int main(int argc, char *argv[]) {
         if (kalshiMarketFeed) {
           kalshi_markets = kalshiMarketFeed->fetchMarkets();
           xpairs = KalshiMarketFeed::matchMarkets(markets, kalshi_markets);
-          spdlog::info("[CrossExchange] Found {} matching pairs",
-                       xpairs.size());
+          // spdlog::info("[CrossExchange] Found {} matching pairs",
+          // xpairs.size());
 
           // Execute Cross-Exchange Arbitrage
-          auto results = crossExec.process(xpairs, markets, kalshi_markets);
+          // Use persisted instance if available
+          if (!crossExec) {
+            crossExec = std::make_unique<CrossExchangeExecution>(
+                feed, *kalshiMarketFeed, depGraph, cfg);
+          }
+          auto results = crossExec->process(xpairs, markets, kalshi_markets);
           for (const auto &res : results) {
             spdlog::info("[CrossExec] {} | {} ↔ {} | Net: ${:.2f} | Status: {}",
                          res.timestamp, res.poly_id, res.kalshi_id,

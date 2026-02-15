@@ -21,6 +21,9 @@ public:
                const std::vector<Market> &kalshi_markets,
                double min_similarity = 0.4);
 
+  // REST: fetch order book for a ticker
+  OrderBook fetchOrderBook(const std::string &ticker);
+
   // REST: submit an order (live or paper)
   std::optional<std::string> submitOrder(const std::string &ticker, Side side,
                                          double price, double count);

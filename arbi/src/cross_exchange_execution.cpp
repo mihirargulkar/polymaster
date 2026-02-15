@@ -1,4 +1,5 @@
 #include "arbi/cross_exchange_execution.hpp"
+#include "arbi/execution.hpp"
 #include <chrono>
 #include <cmath>
 #include <spdlog/spdlog.h>
@@ -10,7 +11,7 @@ CrossExchangeExecution::CrossExchangeExecution(MarketFeed &poly_feed,
                                                DependencyGraph &dep_graph,
                                                const Config &config)
     : poly_feed_(poly_feed), kalshi_feed_(kalshi_feed), dep_graph_(dep_graph),
-      config_(config) {}
+      config_(config), current_exposure_usd_(0.0) {}
 
 std::vector<CrossExchangeResult>
 CrossExchangeExecution::process(const std::vector<CrossExchangePair> &pairs,
@@ -79,128 +80,126 @@ CrossExchangeExecution::executeArb(const CrossExchangePair &pair,
   res.kalshi_id = kalshi_mkt.kalshi_ticker;
   res.spread = pair.spread;
   res.action = "PENDING";
-  res.status = "SUCCESS"; // Optimistic default for logs
-
-  // Strategy:
-  // If Poly Price < Kalshi Price:
-  //   1. Buy YES on Poly (at e.g. 0.40)
-  //   2. Buy NO on Kalshi (at e.g. 1.00 - 0.60 = 0.40). Wait...
-  //      If Kalshi YES is 0.60, then NO is 0.40.
-  //      We buy YES(Poly) @ 0.40 and NO(Kalshi) @ 0.40.
-  //      Total cost = 0.80. Payout = 1.00 (one event wins). Profit = 0.20.
-  //      Wait, are they the SAME event?
-  //      If Poly says "Will Biden win?" and Kalshi says "Will Biden win?"
-  //      If Poly=0.40, Kalshi=0.60.
-  //      Buy YES on Poly (cost 0.40). Payoff if Win=1.
-  //      Sell YES on Kalshi (price 0.60). Payoff if Win=-1? No, we can't short
-  //      easily. But Buying NO is equivalent to selling YES if markets are
-  //      truly binary complement. Kalshi YES=0.60 implies NO=0.40. If we Buy NO
-  //      on Kalshi @ 0.40... Scenario A (Biden Wins): Poly YES pays $1. Kalshi
-  //      NO pays $0. Net +$1. Cost $0.80. Profit $0.20. Scenario B (Biden
-  //      Loses): Poly YES pays $0. Kalshi NO pays $1. Net +$1. Cost $0.80.
-  //      Profit $0.20. Perfect hedge!
+  res.status = "SUCCESS";
 
   double trade_size_usd = config_.max_trade_usd;
+  double total_fees = 2.0 * config_.fee_rate;
+
+  // ── Global Exposure Check ──
+  if (current_exposure_usd_ + trade_size_usd > config_.max_exposure_usd) {
+    spdlog::warn(
+        "[CrossExec] exposure limit reached ({:.2f} + {:.2f} > {:.2f})",
+        current_exposure_usd_, trade_size_usd, config_.max_exposure_usd);
+    res.status = "ABORTED_EXPOSURE";
+    return res;
+  }
+
   double poly_price = pair.poly_yes;
   double kalshi_yes_price = pair.kalshi_yes;
-  double kalshi_no_price = 1.0 - kalshi_yes_price;
 
-  if (poly_price < kalshi_yes_price) {
-    // Arbitrage: Buy Poly YES, Buy Kalshi NO
-    // Prerequisite: Poly YES + Kalshi NO < 1.0
-    // (poly_price + (1 - kalshi_yes)) < 1.0
-    // poly_price - kalshi_yes < 0, which matches logic.
+  // ── Pre-trade VWAP & Slippage Check ──
+  std::string poly_tid_buy;
+  std::string kalshi_ticker = kalshi_mkt.kalshi_ticker;
+  Side poly_side = Side::BUY;
+  Side kalshi_side = Side::BUY;
 
-    double cost = poly_price + kalshi_no_price;
-    if (cost >= 1.0 - total_fees) {
-      spdlog::warn("[CrossExec] Spread vanished during exec check: Cost {:.3f}",
-                   cost);
-      res.status = "ABORTED_COST";
-      return res;
-    }
+  bool buy_poly_yes = (poly_price < kalshi_yes_price);
+  if (buy_poly_yes) {
+    poly_tid_buy = poly_mkt.token_id_yes;
+    kalshi_side = Side::SELL; // Buy NO
+  } else {
+    poly_tid_buy = poly_mkt.token_id_no;
+    kalshi_side = Side::BUY; // Buy YES
+  }
 
+  // Fetch Books
+  auto poly_book = poly_feed_.fetchOrderBook(poly_tid_buy);
+  auto kalshi_book = kalshi_feed_.fetchOrderBook(kalshi_ticker);
+
+  // Compute VWAP
+  double poly_vwap =
+      ExecutionEngine::computeVWAP(poly_book, Side::BUY, trade_size_usd);
+
+  double kalshi_vwap = 0.0;
+  if (kalshi_side == Side::BUY) {
+    kalshi_vwap =
+        ExecutionEngine::computeVWAP(kalshi_book, Side::BUY, trade_size_usd);
+  } else {
+    // Selling YES = Buying NO. Check YES Bids.
+    kalshi_vwap =
+        ExecutionEngine::computeVWAP(kalshi_book, Side::SELL, trade_size_usd);
+  }
+
+  if (poly_vwap < 1e-6 || kalshi_vwap < 1e-6) {
+    spdlog::warn(
+        "[CrossExec] Low liquidity. PolyVWAP={:.3f}, KalshiVWAP={:.3f}",
+        poly_vwap, kalshi_vwap);
+    res.status = "ABORTED_LIQUIDITY";
+    return res;
+  }
+
+  // Re-evaluate cost
+  double real_cost = 0.0;
+  if (buy_poly_yes) {
+    // Buy Poly YES + Buy Kalshi NO
+    // Kalshi VWAP is YES Bid price.
+    // Cost of NO = 1.0 - YES Bid.
+    real_cost = poly_vwap + (1.0 - kalshi_vwap);
+  } else {
+    // Buy Poly NO + Buy Kalshi YES
+    real_cost = poly_vwap + kalshi_vwap;
+  }
+
+  if (real_cost >= 1.0 - total_fees) {
+    spdlog::warn("[CrossExec] VWAP Spread too thin. Cost {:.3f}", real_cost);
+    res.status = "ABORTED_SLIPPAGE";
+    return res;
+  }
+
+  // Execute
+  if (buy_poly_yes) {
     res.action = "BUY_POLY_YES_BUY_KALSHI_NO";
     spdlog::info(
-        "[CrossExec] EXECUTING: Buy Poly YES @ {:.3f}, Buy Kalshi NO @ {:.3f}",
-        poly_price, kalshi_no_price);
+        "[CrossExec] EXEC: Buy Poly YES @ {:.3f}, Buy Kalshi NO @ {:.3f}",
+        poly_vwap, 1.0 - kalshi_vwap);
 
-    // 1. Execute Poly Leg
-    double poly_qty = trade_size_usd / poly_price;
-    auto poly_order = poly_feed_.submitOrder(poly_mkt.token_id_yes, Side::BUY,
-                                             poly_price, poly_qty);
+    // Poly
+    double poly_qty = trade_size_usd / poly_vwap;
+    auto p_ord =
+        poly_feed_.submitOrder(poly_tid_buy, Side::BUY, poly_vwap, poly_qty);
 
-    // 2. Execute Kalshi Leg
-    double kalshi_qty =
-        trade_size_usd / kalshi_no_price; // Approximate match in USD sizing
-    auto kalshi_order = kalshi_feed_.submitOrder(
-        kalshi_mkt.kalshi_ticker, Side::BUY_NO, kalshi_no_price, kalshi_qty);
-    // Wait, submitOrder takes "Side" enum. We need to support BUY_NO.
-    // Looking at KalshiMarketFeed::submitOrder:
-    // if side == Side::BUY -> "side": "yes"
-    // else -> "side": "no".
-    // So Side::SELL in our enum usually meant Selling YES.
-    // But Kalshi Feed implementation:
-    // if (side == Side::BUY) body["side"] = "yes"
-    // else body["side"] = "no".
-    // AND body["action"] is always "buy".
-    // So passing Side::SELL to submitOrder actually executes a "Buy NO" order
-    // on Kalshi.
+    // Kalshi (Buy NO) -> price is (1 - kalshi_vwap)
+    double k_price = 1.0 - kalshi_vwap;
+    double k_qty = trade_size_usd / k_price;
+    auto k_ord =
+        kalshi_feed_.submitOrder(kalshi_ticker, Side::SELL, k_price, k_qty);
 
-    // Let's verify Side enum in common.hpp:
-    // enum class Side { BUY, SELL };
-    // So we use Side::SELL to mean "Buy NO" for Kalshi in this context.
-
-    auto kalshi_res = kalshi_feed_.submitOrder(
-        kalshi_mkt.kalshi_ticker, Side::SELL, kalshi_no_price, kalshi_qty);
-
-    if (poly_order && kalshi_res) {
+    if (p_ord && k_ord) {
       res.status = "FILLED";
-      res.net_profit = (1.0 - cost) * trade_size_usd;
+      res.net_profit = (1.0 - real_cost) * trade_size_usd;
+      current_exposure_usd_ += trade_size_usd;
     } else {
       res.status = "PARTIAL_FAIL";
-      spdlog::error("[CrossExec] Execution failed: Poly={}, Kalshi={}",
-                    poly_order.has_value(), kalshi_res.has_value());
     }
 
   } else {
-    // Arbitrage: Buy Poly NO, Buy Kalshi YES
-    // Poly NO price = 1.0 - poly_price
-    // Check cost: (1-poly) + kalshi < 1.0
-    // kalshi - poly < 0 => kalshi < poly. Matches logic.
-
-    double poly_no_price = 1.0 - poly_price;
-    double cost = poly_no_price + kalshi_yes_price;
-    if (cost >= 1.0 - total_fees) {
-      spdlog::warn("[CrossExec] Spread vanished during exec check: Cost {:.3f}",
-                   cost);
-      res.status = "ABORTED_COST";
-      return res;
-    }
-
     res.action = "BUY_POLY_NO_BUY_KALSHI_YES";
     spdlog::info(
-        "[CrossExec] EXECUTING: Buy Poly NO @ {:.3f}, Buy Kalshi YES @ {:.3f}",
-        poly_no_price, kalshi_yes_price);
+        "[CrossExec] EXEC: Buy Poly NO @ {:.3f}, Buy Kalshi YES @ {:.3f}",
+        poly_vwap, kalshi_vwap);
 
-    // 1. Execute Poly Leg (Buy NO)
-    // Poly API usually buys "No" tokens by specifying token_id_no and Side::BUY
-    // ? Or Side::SELL of Yes tokens? MarketFeed::submitOrder usage:
-    // submitOrder(token_id, side, price, size)
-    // If we want to buy NO, we typically buy the NO token.
-    // Let's use Side::BUY on the NO token.
+    double poly_qty = trade_size_usd / poly_vwap;
+    auto p_ord =
+        poly_feed_.submitOrder(poly_tid_buy, Side::BUY, poly_vwap, poly_qty);
 
-    double poly_qty = trade_size_usd / poly_no_price;
-    auto poly_order = poly_feed_.submitOrder(poly_mkt.token_id_no, Side::BUY,
-                                             poly_no_price, poly_qty);
+    double k_qty = trade_size_usd / kalshi_vwap;
+    auto k_ord =
+        kalshi_feed_.submitOrder(kalshi_ticker, Side::BUY, kalshi_vwap, k_qty);
 
-    // 2. Execute Kalshi Leg (Buy YES)
-    double kalshi_qty = trade_size_usd / kalshi_yes_price;
-    auto kalshi_order = kalshi_feed_.submitOrder(
-        kalshi_mkt.kalshi_ticker, Side::BUY, kalshi_yes_price, kalshi_qty);
-
-    if (poly_order && kalshi_order) {
+    if (p_ord && k_ord) {
       res.status = "FILLED";
-      res.net_profit = (1.0 - cost) * trade_size_usd;
+      res.net_profit = (1.0 - real_cost) * trade_size_usd;
+      current_exposure_usd_ += trade_size_usd;
     } else {
       res.status = "PARTIAL_FAIL";
     }

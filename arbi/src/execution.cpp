@@ -12,6 +12,7 @@ ExecutionEngine::ExecutionEngine(MarketFeed &feed, const Config &config)
 
 // ── VWAP calculation ─────────────────────────────────────────────────
 // ── VWAP calculation ─────────────────────────────────────────────────
+// ── VWAP calculation ─────────────────────────────────────────────────
 double ExecutionEngine::computeVWAP(const OrderBook &book, Side side,
                                     double size) {
   const auto &levels = (side == Side::BUY) ? book.asks : book.bids;
@@ -38,6 +39,7 @@ double ExecutionEngine::computeVWAP(const OrderBook &book, Side side,
   return total_cost / total_filled;
 }
 
+// ── Slippage estimation ──────────────────────────────────────────────
 // ── Slippage estimation ──────────────────────────────────────────────
 // ── Slippage estimation ──────────────────────────────────────────────
 double ExecutionEngine::estimateSlippage(const OrderBook &book, Side side,

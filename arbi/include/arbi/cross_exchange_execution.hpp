@@ -34,6 +34,7 @@ private:
   KalshiMarketFeed &kalshi_feed_;
   DependencyGraph &dep_graph_;
   Config config_;
+  double current_exposure_usd_ = 0.0;
 
   // Execute a single arbitrage opportunity
   CrossExchangeResult executeArb(const CrossExchangePair &pair,
