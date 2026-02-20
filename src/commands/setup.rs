@@ -420,20 +420,19 @@ pub async fn setup_config() -> Result<(), Box<dyn std::error::Error>> {
         min_spread: existing.min_spread,
         bet_size: existing.bet_size,
         kalshi_is_demo: existing.kalshi_is_demo,
-        discord_webhook_url: None,
+        discord_webhook_url: existing.discord_webhook_url.clone(),
+        ollama_model: existing.ollama_model.clone(),
+        ollama_embed_model: existing.ollama_embed_model.clone(),
+        ollama_url: existing.ollama_url.clone(),
+        max_entry_price_cents: existing.max_entry_price_cents,
+        max_bet_fraction: existing.max_bet_fraction,
+        max_bet_cap: existing.max_bet_cap,
+        max_open_positions: existing.max_open_positions,
+        daily_loss_limit: existing.daily_loss_limit,
+        reserve_fraction: existing.reserve_fraction,
     };
 
     crate::config::save_config(&config)?;
-
-    // Also write to integration/.env if AI mode enabled
-    if ai_agent_mode {
-        if let Err(e) = crate::config::write_integration_env(&rapidapi_key, &perplexity_api_key) {
-            println!(
-                "{}",
-                format!("Note: Could not write integration/.env: {}", e).bright_yellow()
-            );
-        }
-    }
 
     println!(
         "{}",

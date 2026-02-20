@@ -221,38 +221,59 @@ async fn fetch_positions_count(wallet_id: &str) -> Option<u32> {
     Some(positions.len() as u32)
 }
 
-/// Compute win rate from closed positions
+/// Compute win rate from ALL closed positions (paginated — API returns 50 per page sorted by PnL desc).
 async fn fetch_win_rate(wallet_id: &str) -> Option<(f64, u32)> {
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(10))
         .build()
         .ok()?;
 
-    let response = client
-        .get("https://data-api.polymarket.com/closed-positions")
-        .query(&[("user", wallet_id), ("limit", "100")])
-        .header("Accept", "application/json")
-        .send()
-        .await
-        .ok()?;
+    let mut all_positions: Vec<ClosedPositionEntry> = Vec::new();
+    let page_size = 50;
 
-    if !response.status().is_success() {
+    for page in 0..20 {
+        let offset = page * page_size;
+        let resp = client
+            .get("https://data-api.polymarket.com/closed-positions")
+            .query(&[
+                ("user", wallet_id),
+                ("limit", &page_size.to_string()),
+                ("offset", &offset.to_string()),
+            ])
+            .header("Accept", "application/json")
+            .send()
+            .await
+            .ok()?;
+
+        if !resp.status().is_success() {
+            break;
+        }
+
+        let text = resp.text().await.ok()?;
+        let page_positions: Vec<ClosedPositionEntry> = serde_json::from_str(&text).ok()?;
+        let count = page_positions.len();
+        all_positions.extend(page_positions);
+
+        if count < page_size {
+            break;
+        }
+    }
+
+    if all_positions.is_empty() {
         return None;
     }
 
-    let text = response.text().await.ok()?;
-    let positions: Vec<ClosedPositionEntry> = serde_json::from_str(&text).ok()?;
+    let total = all_positions.len() as u32;
+    let wins = all_positions
+        .iter()
+        .filter(|p| p.realized_pnl.unwrap_or(0.0) > 0.0)
+        .count() as u32;
 
-    if positions.is_empty() {
-        return None;
-    }
-
-    let total = positions.len() as u32;
-    let wins = positions.iter().filter(|p| {
-        p.realized_pnl.unwrap_or(0.0) > 0.0
-    }).count() as u32;
-
-    let rate = if total > 0 { wins as f64 / total as f64 } else { 0.0 };
+    let rate = if total > 0 {
+        wins as f64 / total as f64
+    } else {
+        0.0
+    };
     Some((rate, total))
 }
 

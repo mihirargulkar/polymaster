@@ -164,8 +164,8 @@ app.get('/api/stats', (req, res) => {
                     stats.pnl_today = currentEquity - startEquity;
                     stats.pnl_pct = startEquity > 0 ? ((stats.pnl_today / startEquity) * 100) : 0;
 
-                    // 5. Executed Orders
-                    db.get("SELECT count(*) as count FROM orders WHERE status = 'filled' OR status = 'simulated'", [], (err, row) => {
+                    // 5. Executed Orders (from alerts table, where Rust watcher marks them)
+                    db.get("SELECT count(*) as count FROM alerts WHERE status = 'EXECUTED' OR live_trade_id IS NOT NULL", [], (err, row) => {
                         stats.executed_orders = row ? row.count : 0;
                         res.json(stats);
                     });

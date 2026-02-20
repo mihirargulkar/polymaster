@@ -56,7 +56,13 @@ fn init_schema(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
             timestamp TEXT NOT NULL,
             market_context TEXT,
             wallet_activity TEXT,
-            created_at INTEGER DEFAULT (strftime('%s', 'now'))
+            created_at INTEGER DEFAULT (strftime('%s', 'now')),
+            live_trade_id TEXT,
+            status TEXT DEFAULT 'OPEN',
+            settled_outcome TEXT,
+            pnl_value REAL,
+            shadow_bet_amount REAL,
+            shadow_active INTEGER DEFAULT 0
         );
 
         CREATE INDEX IF NOT EXISTS idx_alerts_wallet_hash ON alerts(wallet_hash);
@@ -87,10 +93,36 @@ fn init_schema(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
             value TEXT
         );
 
-        INSERT OR IGNORE INTO metadata (key, value) VALUES ('schema_version', '1');
+        INSERT OR IGNORE INTO metadata (key, value) VALUES ('schema_version', '2');
         INSERT OR IGNORE INTO metadata (key, value) VALUES ('created_at', strftime('%s', 'now'));"
     )?;
 
+    // Migration: add execution-tracking columns to existing alerts tables
+    migrate_alerts_execution_columns(conn)?;
+
+    Ok(())
+}
+
+/// Add execution-tracking columns to alerts if missing (for DBs created before schema v2).
+fn migrate_alerts_execution_columns(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+    let columns = [
+        "live_trade_id TEXT",
+        "status TEXT DEFAULT 'OPEN'",
+        "settled_outcome TEXT",
+        "pnl_value REAL",
+        "shadow_bet_amount REAL",
+        "shadow_active INTEGER DEFAULT 0",
+    ];
+    for col_def in &columns {
+        let col_name = col_def.split_whitespace().next().unwrap_or("");
+        let sql = format!("ALTER TABLE alerts ADD COLUMN {};", col_def);
+        if let Err(e) = conn.execute(&sql, []) {
+            // Ignore "duplicate column name" for existing columns
+            if !e.to_string().contains("duplicate column") {
+                eprintln!("Warning: migration add column {}: {}", col_name, e);
+            }
+        }
+    }
     Ok(())
 }
 

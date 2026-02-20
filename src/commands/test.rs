@@ -1,9 +1,7 @@
 use colored::*;
 
 use crate::alerts::sound;
-use crate::alerts::{AlertData};
 use crate::alerts::webhook;
-use crate::types;
 
 pub async fn test_sound() -> Result<(), Box<dyn std::error::Error>> {
     println!("{}", "TESTING ALERT SOUND".bright_cyan().bold());
@@ -26,7 +24,7 @@ pub async fn test_sound() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-pub async fn test_webhook(conn: &rusqlite::Connection) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn test_webhook(_conn: &rusqlite::Connection) -> Result<(), Box<dyn std::error::Error>> {
     println!("{}", "TESTING WEBHOOK".bright_cyan().bold());
     println!();
 
@@ -41,7 +39,8 @@ pub async fn test_webhook(conn: &rusqlite::Connection) -> Result<(), Box<dyn std
         }
     };
 
-    let webhook_url = match config.webhook_url {
+    let webhook_url = config.webhook_url.or(config.discord_webhook_url);
+    let webhook_url = match webhook_url {
         Some(url) => url,
         None => {
             println!(
@@ -52,90 +51,35 @@ pub async fn test_webhook(conn: &rusqlite::Connection) -> Result<(), Box<dyn std
         }
     };
 
-    println!("Sending test alert to: {}", webhook_url.bright_green());
+    println!("Sending test execution alert to: {}", webhook_url.bright_green());
     println!();
 
-    let test_activity = types::WalletActivity {
-        transactions_last_hour: 2,
-        transactions_last_day: 5,
-        total_value_hour: 125000.0,
-        total_value_day: 380000.0,
-        is_repeat_actor: true,
-        is_heavy_actor: true,
+    let test_alert = webhook::ExecutionAlert {
+        kalshi_ticker: "KXNBAGAME-26FEB20-TEST".to_string(),
+        side: "yes".to_string(),
+        count: 5,
+        price_cents: 62,
+        fee_cents: 2,
+        total_cost_cents: 320,
+        ev_cents: 23.0,
+        kelly_pct: 1.85,
+        whale_win_rate: 0.87,
+        balance_after_cents: 4680,
+        poly_title: "Lakers vs Celtics: Will the Lakers win?".to_string(),
+        order_id: "test-order-12345".to_string(),
     };
 
-    let test_whale = crate::whale_profile::WhaleProfile {
-        wallet_id: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb".to_string(),
-        portfolio_value: Some(1500000.0),
-        positions_count: Some(12),
-        leaderboard_rank: Some(5),
-        leaderboard_profit: Some(450000.0),
-        win_rate: Some(0.82),
-        markets_traded: Some(85),
-    };
+    webhook::send_execution_alert(&webhook_url, &test_alert).await;
 
-    // Test BUY alert (HIGH TIER)
-    let timestamp = chrono::Utc::now().to_rfc3339();
-    let buy_alert = AlertData {
-        platform: "Polymarket",
-        market_title: Some("yes Michigan St.,yes Saint Peter's,yes Harvard wins by over 5.5 Points,no Iona wins by over 5.5 Points,no Boise St. wins by over 9.5 Points"),
-        market_id: None,
-        outcome: Some("Yes"),
-        side: "BUY",
-        value: 250000.0,
-        price: 0.65,
-        size: 384615.38,
-        timestamp: &timestamp,
-        wallet_id: Some("0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb"),
-        wallet_activity: Some(&test_activity),
-        market_context: None,
-        whale_profile: Some(&test_whale),
-        order_book: None,
-        top_holders: None,
-    };
-    webhook::send_webhook_alert(&webhook_url, &buy_alert).await;
-    crate::alerts::history::log_alert(&buy_alert, conn);
-
-    println!("High-Tier Test BUY alert sent and logged!");
-
-    // Test SELL alert
-    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-
-    let timestamp2 = chrono::Utc::now().to_rfc3339();
-    let sell_alert = AlertData {
-        platform: "Kalshi",
-        market_title: Some("Bitcoin price on Jan 16, 2026?"),
-        market_id: None,
-        outcome: Some("Bitcoin (BTC) price < $96999.99 at expiry"),
-        side: "SELL",
-        value: 35000.0,
-        price: 0.54,
-        size: 64814.81,
-        timestamp: &timestamp2,
-        wallet_id: None,
-        wallet_activity: None,
-        market_context: None,
-        whale_profile: None,
-        order_book: None,
-        top_holders: None,
-    };
-    webhook::send_webhook_alert(&webhook_url, &sell_alert).await;
-    crate::alerts::history::log_alert(&sell_alert, conn);
-
-    println!("Test SELL alert sent and logged!");
+    println!("{}", "Test execution alert sent!".bright_green());
     println!();
-    println!("{}", "Test webhooks sent!".bright_green());
-    println!("Check your n8n workflow to see if it received the data.");
-    println!();
-    println!("The webhooks should receive JSON payloads with:");
-    println!("  Test 1 - Polymarket BUY:");
-    println!("    - alert_type: WHALE_ENTRY");
-    println!("    - action: BUY");
-    println!("    - value: $50,000");
-    println!("  Test 2 - Kalshi SELL:");
-    println!("    - alert_type: WHALE_EXIT");
-    println!("    - action: SELL");
-    println!("    - value: $35,000");
+    println!("You should see a Discord embed (or JSON payload) with:");
+    println!("  Ticker:   KXNBAGAME-26FEB20-TEST");
+    println!("  Side:     YES @ 62c");
+    println!("  Qty:      5 contracts");
+    println!("  Cost:     $3.20");
+    println!("  EV:       +23.0c/contract");
+    println!("  Win Rate: 87.0%");
 
     Ok(())
 }

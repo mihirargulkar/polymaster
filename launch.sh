@@ -46,12 +46,6 @@ node dashboard/server.js > dashboard.log 2>&1 &
 DASH_PID=$!
 echo "   (Logs: dashboard.log)"
 
-# 3. Start PnL Tracker (Updates Chart)
-echo "📈 Starting PnL Tracker..."
-.venv/bin/python3 pnl_tracker.py > pnl_tracker.log 2>&1 &
-PNL_PID=$!
-echo "   (Logs: pnl_tracker.log)"
-
 echo "   👉 Dashboard available at http://localhost:3000"
 
 # Wait for all processes

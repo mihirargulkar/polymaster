@@ -87,6 +87,8 @@ struct MarketData {
     subtitle: Option<String>,
     category: Option<String>,
     #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
     tags: Vec<String>,
 }
 
@@ -101,101 +103,174 @@ pub struct MarketInfo {
 }
 
 #[derive(Debug, Deserialize)]
-struct EventData {
+struct EventDataNested {
+    #[allow(dead_code)]
     event_ticker: String,
+    #[serde(default)]
     category: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct EventsResponse {
-    events: Vec<EventData>,
-}
-
-#[derive(Debug, Deserialize)]
-struct MarketsResponse {
+    #[serde(default)]
     markets: Vec<MarketData>,
 }
 
-pub async fn fetch_active_markets() -> Result<Vec<MarketInfo>, KalshiError> {
-    println!("🔍 Starting fetch_active_markets via Events (paginated)...");
+#[derive(Debug, Deserialize)]
+struct EventsNestedResponse {
+    events: Vec<EventDataNested>,
+}
+
+// ── Sport team detection for targeted series queries ─────────────────────
+
+static NBA_TEAMS: &[&str] = &[
+    "hawks", "celtics", "nets", "hornets", "bulls", "cavaliers", "cavs",
+    "mavericks", "mavs", "nuggets", "pistons", "warriors", "rockets",
+    "pacers", "clippers", "lakers", "grizzlies", "heat", "bucks",
+    "timberwolves", "wolves", "pelicans", "knicks", "thunder", "magic",
+    "76ers", "sixers", "suns", "blazers", "kings", "spurs", "raptors",
+    "jazz", "wizards",
+];
+
+static NFL_TEAMS: &[&str] = &[
+    "patriots", "chiefs", "eagles", "cowboys", "49ers", "niners",
+    "packers", "steelers", "bills", "ravens", "bengals", "dolphins",
+    "jets", "titans", "colts", "jaguars", "texans", "broncos",
+    "chargers", "raiders", "seahawks", "rams", "commanders", "bears",
+    "lions", "vikings", "saints", "falcons", "panthers", "buccaneers",
+    "bucs",
+];
+
+static NHL_TEAMS: &[&str] = &[
+    "bruins", "blackhawks", "canadiens", "habs", "flames", "hurricanes",
+    "avalanche", "stars", "red wings", "oilers", "penguins", "flyers",
+    "lightning", "maple leafs", "canucks", "capitals", "predators",
+    "devils", "islanders", "rangers", "senators", "sabres", "kraken",
+    "sharks", "blues", "wild", "ducks",
+];
+
+static MLB_TEAMS: &[&str] = &[
+    "yankees", "mets", "dodgers", "braves", "astros", "phillies",
+    "padres", "mariners", "guardians", "orioles", "twins", "rays",
+    "royals", "brewers", "diamondbacks", "cubs", "reds", "angels",
+    "white sox", "red sox", "tigers", "rockies", "pirates", "marlins",
+    "blue jays",
+];
+
+fn detect_series_tickers(title: &str) -> Vec<&'static str> {
+    let lower = title.to_lowercase();
+    let mut series = Vec::new();
+
+    if lower.contains("nba") || lower.contains("basketball")
+        || NBA_TEAMS.iter().any(|t| lower.contains(t))
+    {
+        series.push("KXNBAGAME");
+    }
+    if lower.contains("nfl") || NFL_TEAMS.iter().any(|t| lower.contains(t)) {
+        series.push("KXNFLGAME");
+    }
+    if lower.contains("nhl") || lower.contains("hockey")
+        || NHL_TEAMS.iter().any(|t| lower.contains(t))
+    {
+        series.push("KXNHLGAME");
+    }
+    if lower.contains("mlb") || lower.contains("baseball")
+        || MLB_TEAMS.iter().any(|t| lower.contains(t))
+    {
+        series.push("KXMLBGAME");
+    }
+    if lower.contains("soccer") || lower.contains("football club")
+        || lower.contains(" fc ") || lower.contains(" fc,")
+    {
+        series.push("KXSOCCER");
+    }
+
+    series
+}
+
+fn collect_markets_from_events(
+    events: Vec<EventDataNested>,
+    seen: &mut std::collections::HashSet<String>,
+    out: &mut Vec<MarketInfo>,
+) {
+    for event in events {
+        for m in event.markets {
+            let status = m.status.as_deref().unwrap_or("");
+            if status == "settled" || status == "finalized" {
+                continue;
+            }
+            if m.ticker.starts_with("KXMV") {
+                continue;
+            }
+            if !seen.insert(m.ticker.clone()) {
+                continue;
+            }
+            out.push(MarketInfo {
+                title: m.title.or(m.subtitle).unwrap_or_else(|| "Unknown".into()),
+                category: m.category.or(event.category.clone()),
+                tags: m.tags,
+                ticker: m.ticker,
+            });
+        }
+    }
+}
+
+/// On-demand search: query Kalshi for markets relevant to a Polymarket title.
+/// Uses targeted series queries for sports and a general events fetch otherwise.
+pub async fn search_markets(poly_title: &str) -> Result<Vec<MarketInfo>, KalshiError> {
     let client = reqwest::Client::new();
     let events_url = "https://api.elections.kalshi.com/trade-api/v2/events";
-    
-    let mut all_events = Vec::new();
-    let mut cursor: Option<String> = None;
-    
-    // 1. Fetch up to 3 pages of active events (600 total) to discover "normal" markets
-    for _ in 0..3 {
-        let mut query = vec![("status", "open".to_string()), ("limit", "200".to_string())];
-        if let Some(ref c) = cursor {
-            query.push(("cursor", c.clone()));
-        }
-        
-        let events_resp = client
-            .get(events_url)
-            .query(&query)
-            .send()
-            .await?;
-            
-        if !events_resp.status().is_success() {
-            println!("  Warning: Events API failed: {}", events_resp.status());
-            break;
-        }
-        
-        let text = events_resp.text().await?;
-        let data: EventsResponse = serde_json::from_str(&text).map_err(|e| KalshiError::ParseError(e.to_string()))?;
-        
-        let count = data.events.len();
-        all_events.extend(data.events);
-        
-        // Update cursor for next page
-        // Note: The curl output showed "cursor" at top level
-        let parsed: serde_json::Value = serde_json::from_str(&text).map_err(|e| KalshiError::ParseError(e.to_string()))?;
-        if let Some(c) = parsed.get("cursor").and_then(|v| v.as_str()) {
-            if c.is_empty() { break; }
-            cursor = Some(c.to_string());
-        } else {
-            break;
-        }
-        
-        if count < 200 { break; }
-    }
-    
-    println!("  Found {} active events. Fetching markets for each...", all_events.len());
-    
+
+    let series = detect_series_tickers(poly_title);
     let mut all_markets = Vec::new();
-    let markets_url = "https://api.elections.kalshi.com/trade-api/v2/markets";
-    
-    // For each event, fetch its markets
-    for event in all_events {
-        let m_resp = client
-            .get(markets_url)
-            .query(&[("event_ticker", event.event_ticker), ("status", "open".to_string())])
+    let mut seen_tickers = std::collections::HashSet::new();
+
+    for s in &series {
+        let resp = client
+            .get(events_url)
+            .query(&[
+                ("series_ticker", *s),
+                ("status", "open"),
+                ("limit", "100"),
+                ("with_nested_markets", "true"),
+            ])
             .send()
             .await;
-            
-        if let Ok(resp) = m_resp {
+
+        if let Ok(resp) = resp {
             if resp.status().is_success() {
                 if let Ok(text) = resp.text().await {
-                    if let Ok(m_data) = serde_json::from_str::<MarketsResponse>(&text) {
-                        for m in m_data.markets {
-                            // Still filter out KXMV just in case
-                            if !m.ticker.starts_with("KXMV") {
-                                all_markets.push(MarketInfo {
-                                    title: m.title.clone().or(m.subtitle.clone()).unwrap_or_else(|| "Unknown".to_string()),
-                                    category: m.category.clone().or(event.category.clone()),
-                                    tags: m.tags,
-                                    ticker: m.ticker,
-                                });
-                            }
-                        }
+                    if let Ok(data) = serde_json::from_str::<EventsNestedResponse>(&text) {
+                        collect_markets_from_events(data.events, &mut seen_tickers, &mut all_markets);
                     }
                 }
             }
         }
     }
-    
-    println!("  Cache status: {} markets discovered and filtered", all_markets.len());
+
+    if series.is_empty() || all_markets.is_empty() {
+        let resp = client
+            .get(events_url)
+            .query(&[
+                ("status", "open"),
+                ("limit", "200"),
+                ("with_nested_markets", "true"),
+            ])
+            .send()
+            .await?;
+
+        if resp.status().is_success() {
+            if let Ok(text) = resp.text().await {
+                if let Ok(data) = serde_json::from_str::<EventsNestedResponse>(&text) {
+                    collect_markets_from_events(data.events, &mut seen_tickers, &mut all_markets);
+                }
+            }
+        }
+    }
+
+    println!(
+        "🔍 On-demand search for \"{}\" → {} markets (series: {:?})",
+        poly_title,
+        all_markets.len(),
+        if series.is_empty() { vec!["general"] } else { series.iter().copied().collect() }
+    );
+
     Ok(all_markets)
 }
 

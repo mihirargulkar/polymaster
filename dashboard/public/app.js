@@ -124,12 +124,13 @@ function renderFeed(items) {
         const price = item.price || 0;
         const outcome = item.outcome || 'Unknown';
 
+        const isExecuted = item.status === 'EXECUTED' || item.live_trade_id;
         el.innerHTML = `
             <div class="feed-left">
                 <div class="ticker" title="${title}">
-                    ${title}
+                    ${isExecuted ? '<span style="color:#34d399;font-weight:600;margin-right:4px;">TRADED</span>' : ''}${title}
                 </div>
-                <div class="desc">${outcome} • ${item.platform} • <span class="time">${new Date(item.timestamp).toLocaleTimeString()}</span></div>
+                <div class="desc">${outcome} • ${item.platform}${isExecuted ? ' → Kalshi' : ''} • <span class="time">${new Date(item.timestamp).toLocaleTimeString()}</span></div>
             </div>
             <div class="feed-right">
                 <div class="price">${formatCurrency(value)}</div>
@@ -137,6 +138,10 @@ function renderFeed(items) {
                 ${item.settled_outcome ? `
                     <div class="meta" style="color: ${item.pnl_value > 0 ? '#34d399' : '#fb7185'}">
                         ${item.pnl_value > 0 ? 'WON' : 'LOST'} (${item.settled_outcome})
+                    </div>
+                ` : isExecuted ? `
+                    <div class="meta" style="color: #34d399;">
+                        Executed $${(item.shadow_bet_amount || 0).toFixed(2)} @ ${(price * 100).toFixed(1)}¢
                     </div>
                 ` : `
                     <div class="meta text-slate-400">

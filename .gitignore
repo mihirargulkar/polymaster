@@ -10,53 +10,33 @@ Cargo.lock
 *.swo
 *~
 
-# macOS
 # Logs
-logs/
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+logs/
 
-# Environment Variables
+# Environment & secrets
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*
+kalshi-key.pem
 
-# Dependency directories
+# Dependencies
 node_modules/
-jspm_packages/
 
-# TypeScript
-*.tsbuildinfo
+# Python
+.venv/
+__pycache__/
+*.pyc
 
-# Optional npm cache directory
-.npm
-
-# Optional eslint cache
-.eslintcache
-
-# Optional REPL history
-.node_repl_history
-
-# Output of 'npm pack'
-*.tgz
-
-# Yarn Integrity file
-.yarn-integrity
-
-# dotenv-linter
-.env.lint
-
-# MacOS
+# macOS
 .DS_Store
 
-# CMake
+# Build artifacts
+*.tgz
 build/
-CMakeCache.txt
-CMakeFiles/
-cmake_install.cmake
-Makefile
-integration/node_modules
+
+# Browser automation
+.playwright-mcp/
+
+# Runtime data (keep DB but ignore WAL/SHM)
+*.db-shm
+*.db-wal

@@ -40,6 +40,34 @@ pub struct Config {
     /// Default 0.0 (disabled).
     #[serde(default = "default_min_spread")]
     pub min_spread: f64,
+    /// Ollama model for Polymarket→Kalshi market matching (e.g. "llama3", "qwen2.5-coder:7b").
+    #[serde(default = "default_ollama_model")]
+    pub ollama_model: String,
+    /// Ollama embedding model for first-stage retrieval (e.g. "nomic-embed-text").
+    #[serde(default = "default_ollama_embed_model")]
+    pub ollama_embed_model: String,
+    /// Ollama API base URL for generate endpoint.
+    #[serde(default = "default_ollama_url")]
+    pub ollama_url: String,
+    /// Maximum entry price in cents for Kalshi orders (default 97).
+    /// Trades above this are skipped to avoid fees eating profits.
+    #[serde(default = "default_max_entry_price_cents")]
+    pub max_entry_price_cents: i64,
+    /// Maximum fraction of bankroll to risk per trade (default 0.02 = 2%).
+    #[serde(default = "default_max_bet_fraction")]
+    pub max_bet_fraction: f64,
+    /// Hard cap on any single bet in dollars (default $10).
+    #[serde(default = "default_max_bet_cap")]
+    pub max_bet_cap: f64,
+    /// Maximum simultaneous open positions (default 5).
+    #[serde(default = "default_max_open_positions")]
+    pub max_open_positions: usize,
+    /// Daily stop-loss as a fraction of day-start balance (default 0.10 = 10%).
+    #[serde(default = "default_daily_loss_limit")]
+    pub daily_loss_limit: f64,
+    /// Minimum bankroll reserve as a fraction of day-start balance (default 0.20 = 20%).
+    #[serde(default = "default_reserve_fraction")]
+    pub reserve_fraction: f64,
 }
 
 fn default_categories() -> Vec<String> {
@@ -66,8 +94,44 @@ fn default_min_spread() -> f64 {
     0.0
 }
 
+fn default_ollama_model() -> String {
+    "llama3".to_string()
+}
+
+fn default_ollama_embed_model() -> String {
+    "nomic-embed-text".to_string()
+}
+
+fn default_ollama_url() -> String {
+    "http://localhost:11434".to_string()
+}
+
 fn default_bet_size() -> f64 {
     5.0
+}
+
+fn default_max_entry_price_cents() -> i64 {
+    97
+}
+
+fn default_max_bet_fraction() -> f64 {
+    0.02
+}
+
+fn default_max_bet_cap() -> f64 {
+    10.0
+}
+
+fn default_max_open_positions() -> usize {
+    5
+}
+
+fn default_daily_loss_limit() -> f64 {
+    0.10
+}
+
+fn default_reserve_fraction() -> f64 {
+    0.20
 }
 
 fn config_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
@@ -98,46 +162,3 @@ pub fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
     Ok(config)
 }
 
-/// Get the integration .env path for AI agent keys
-pub fn integration_env_path() -> Option<PathBuf> {
-    // Try to find integration/.env relative to common locations
-    let possible_paths = vec![
-        PathBuf::from("integration/.env"),
-        dirs::home_dir()?.join("polymaster/integration/.env"),
-        dirs::home_dir()?.join("polymaster-test/integration/.env"),
-    ];
-    
-    for path in possible_paths {
-        if path.exists() {
-            return Some(path);
-        }
-    }
-    None
-}
-
-/// Write API keys to integration/.env for the AI agent CLI
-pub fn write_integration_env(rapidapi_key: &Option<String>, perplexity_key: &Option<String>) -> Result<(), Box<dyn std::error::Error>> {
-    let env_path = integration_env_path();
-    
-    if let Some(path) = env_path {
-        let mut content = String::new();
-        content.push_str("# wwatcher AI integration environment\n");
-        content.push_str("WWATCHER_HISTORY_PATH=~/.config/wwatcher/alert_history.jsonl\n\n");
-        
-        if let Some(key) = rapidapi_key {
-            content.push_str(&format!("RAPIDAPI_KEY={}\n", key));
-        } else {
-            content.push_str("# RAPIDAPI_KEY=\n");
-        }
-        
-        if let Some(key) = perplexity_key {
-            content.push_str(&format!("PERPLEXITY_API_KEY={}\n", key));
-        } else {
-            content.push_str("# PERPLEXITY_API_KEY=\n");
-        }
-        
-        fs::write(path, content)?;
-    }
-    
-    Ok(())
-}

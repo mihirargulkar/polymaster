@@ -16,7 +16,7 @@ pub struct KalshiExecutor {
     client: reqwest::Client,
     base_url: String,
     key_id: String,
-    private_key: RsaPrivateKey,
+    signing_key: BlindedSigningKey<Sha256>,
 }
 
 #[derive(Serialize)]
@@ -38,6 +38,7 @@ struct OrderResponse {
 }
 
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)]
 struct OrderObj {
     order_id: String,
     status: String,
@@ -47,6 +48,7 @@ impl KalshiExecutor {
     pub fn new(key_id: String, private_key_pem: &str, is_demo: bool) -> Result<Self, Box<dyn std::error::Error>> {
         let private_key = RsaPrivateKey::from_pkcs8_pem(private_key_pem)
             .or_else(|_| RsaPrivateKey::from_pkcs1_pem(private_key_pem))?;
+        let signing_key = BlindedSigningKey::<Sha256>::new(private_key);
         let base_url = if is_demo {
             "https://demo-api.kalshi.co/trade-api/v2".to_string()
         } else {
@@ -57,16 +59,121 @@ impl KalshiExecutor {
             client: reqwest::Client::new(),
             base_url,
             key_id,
-            private_key,
+            signing_key,
         })
     }
 
     fn sign_request(&self, method: &str, path: &str, timestamp: &str) -> Result<String, Box<dyn std::error::Error>> {
         let msg = format!("{}{}{}", timestamp, method, path);
         let mut rng = rand::thread_rng();
-        let signing_key = BlindedSigningKey::<Sha256>::new(self.private_key.clone());
-        let signature = signing_key.sign_with_rng(&mut rng, msg.as_bytes());
+        let signature = self.signing_key.sign_with_rng(&mut rng, msg.as_bytes());
         Ok(general_purpose::STANDARD.encode(signature.to_bytes()))
+    }
+
+    fn auth_headers(&self, method: &str, path: &str) -> Result<HeaderMap, Box<dyn std::error::Error>> {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)?
+            .as_millis()
+            .to_string();
+        let signature = self.sign_request(method, path, &timestamp)?;
+        let mut headers = HeaderMap::new();
+        headers.insert("KALSHI-ACCESS-KEY", HeaderValue::from_str(&self.key_id)?);
+        headers.insert("KALSHI-ACCESS-SIGNATURE", HeaderValue::from_str(&signature)?);
+        headers.insert("KALSHI-ACCESS-TIMESTAMP", HeaderValue::from_str(&timestamp)?);
+        Ok(headers)
+    }
+
+    pub async fn get_balance(&self) -> Result<i64, Box<dyn std::error::Error>> {
+        let path = "/trade-api/v2/portfolio/balance";
+        let url = format!("{}/portfolio/balance", self.base_url);
+        let headers = self.auth_headers("GET", path)?;
+
+        let resp = self.client
+            .get(&url)
+            .headers(headers)
+            .send()
+            .await?;
+
+        if resp.status().is_success() {
+            let data: serde_json::Value = resp.json().await?;
+            let balance_cents = data.get("balance")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+            Ok(balance_cents)
+        } else {
+            let err_text = resp.text().await?;
+            Err(format!("Balance check failed: {}", err_text).into())
+        }
+    }
+
+    pub async fn has_open_position(&self, event_ticker: &str) -> Result<bool, Box<dyn std::error::Error>> {
+        let path = "/trade-api/v2/portfolio/positions";
+        let url = format!("{}/portfolio/positions", self.base_url);
+        let headers = self.auth_headers("GET", path)?;
+
+        let resp = self.client
+            .get(&url)
+            .headers(headers)
+            .query(&[
+                ("event_ticker", event_ticker),
+                ("count_filter", "position"),
+                ("limit", "10"),
+            ])
+            .send()
+            .await?;
+
+        if resp.status().is_success() {
+            let data: serde_json::Value = resp.json().await?;
+            let positions = data.get("market_positions")
+                .or_else(|| data.get("positions"))
+                .and_then(|v| v.as_array());
+            match positions {
+                Some(arr) => Ok(!arr.is_empty()),
+                None => Ok(false),
+            }
+        } else {
+            let err_text = resp.text().await?;
+            Err(format!("Position check failed: {}", err_text).into())
+        }
+    }
+
+    pub async fn get_open_event_tickers(&self) -> Result<std::collections::HashSet<String>, Box<dyn std::error::Error>> {
+        let path = "/trade-api/v2/portfolio/positions";
+        let url = format!("{}/portfolio/positions", self.base_url);
+        let headers = self.auth_headers("GET", path)?;
+
+        let resp = self.client
+            .get(&url)
+            .headers(headers)
+            .query(&[
+                ("count_filter", "position"),
+                ("limit", "1000"),
+            ])
+            .send()
+            .await?;
+
+        let mut event_tickers = std::collections::HashSet::new();
+        if resp.status().is_success() {
+            let data: serde_json::Value = resp.json().await?;
+            if let Some(positions) = data.get("market_positions")
+                .or_else(|| data.get("positions"))
+                .and_then(|v| v.as_array())
+            {
+                for pos in positions {
+                    if let Some(ticker) = pos.get("ticker").and_then(|v| v.as_str()) {
+                        let event_key = match ticker.rfind('-') {
+                            Some(p) => ticker[..p].to_string(),
+                            None => ticker.to_string(),
+                        };
+                        event_tickers.insert(event_key);
+                    }
+                    if let Some(et) = pos.get("event_ticker").and_then(|v| v.as_str()) {
+                        event_tickers.insert(et.to_string());
+                    }
+                }
+            }
+        }
+        Ok(event_tickers)
     }
 
     pub async fn place_order(
@@ -76,19 +183,9 @@ impl KalshiExecutor {
         count: i32,
         price_cents: i64,
     ) -> Result<String, Box<dyn std::error::Error>> {
-        let path = "/portfolio/orders";
-        let url = format!("{}{}", self.base_url, path);
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)?
-            .as_millis()
-            .to_string();
-
-        let signature = self.sign_request("POST", path, &timestamp)?;
-
-        let mut headers = HeaderMap::new();
-        headers.insert("KALSHI-ACCESS-KEY", HeaderValue::from_str(&self.key_id)?);
-        headers.insert("KALSHI-ACCESS-SIGNATURE", HeaderValue::from_str(&signature)?);
-        headers.insert("KALSHI-ACCESS-TIMESTAMP", HeaderValue::from_str(&timestamp)?);
+        let path = "/trade-api/v2/portfolio/orders";
+        let url = format!("{}/portfolio/orders", self.base_url);
+        let mut headers = self.auth_headers("POST", path)?;
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
         let body = CreateOrderRequest {
