@@ -96,7 +96,7 @@ fn build_discord_embed(a: &ExecutionAlert) -> serde_json::Value {
                 { "name": "Win Rate", "value": format!("{:.1}%", a.whale_win_rate * 100.0),         "inline": true },
                 { "name": "Balance",  "value": format!("${:.2}", a.balance_after_cents as f64 / 100.0), "inline": true },
             ],
-            "footer": { "text": format!("Order: {}", a.order_id) },
+            "footer": { "text": format!("Polymaster • Filled Trade • Order: {}", a.order_id) },
             "timestamp": chrono::Utc::now().to_rfc3339(),
         }]
     })
@@ -104,6 +104,7 @@ fn build_discord_embed(a: &ExecutionAlert) -> serde_json::Value {
 
 fn build_generic_payload(a: &ExecutionAlert) -> serde_json::Value {
     json!({
+        "source": "polymaster",
         "event": "trade_executed",
         "kalshi_ticker": a.kalshi_ticker,
         "side": a.side,

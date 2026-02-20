@@ -45,6 +45,7 @@ pub async fn show_status(conn: &Connection) -> Result<(), Box<dyn std::error::Er
             };
             println!("  Categories:    {}", cat_display.green());
             println!("  Threshold:     {}", format!("${}", cfg.threshold).green());
+            println!("  Min whale WR: {}%", format!("{:.0}", cfg.min_whale_win_rate * 100.0).green());
             println!(
                 "  Retention:     {}",
                 if cfg.history_retention_days == 0 {

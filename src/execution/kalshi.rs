@@ -180,6 +180,49 @@ impl KalshiExecutor {
         Ok(event_tickers)
     }
 
+    /// Fetch all open positions with ticker, side, and count. For display/verification.
+    pub async fn get_positions(&self) -> Result<Vec<(String, String, i32)>, Box<dyn std::error::Error>> {
+        let path = "/trade-api/v2/portfolio/positions";
+        let url = format!("{}/portfolio/positions", self.base_url);
+        let headers = self.auth_headers("GET", path)?;
+
+        let resp = self.client
+            .get(&url)
+            .headers(headers)
+            .query(&[
+                ("count_filter", "position"),
+                ("limit", "1000"),
+            ])
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let err_text = resp.text().await?;
+            return Err(format!("Positions API failed: {}", err_text).into());
+        }
+
+        let data: serde_json::Value = resp.json().await?;
+        let mut out = Vec::new();
+        if let Some(positions) = data.get("market_positions")
+            .or_else(|| data.get("positions"))
+            .and_then(|v| v.as_array())
+        {
+            for pos in positions {
+                let ticker = pos.get("ticker").and_then(|v| v.as_str()).unwrap_or("?").to_string();
+                let pos_val = pos.get("position")
+                    .and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)))
+                    .unwrap_or(0) as i32;
+                if pos_val == 0 {
+                    continue;
+                }
+                let side = if pos_val > 0 { "YES" } else { "NO" };
+                let count = pos_val.abs();
+                out.push((ticker, side.to_string(), count));
+            }
+        }
+        Ok(out)
+    }
+
     pub async fn place_order(
         &self,
         ticker: &str,
@@ -237,7 +280,9 @@ impl KalshiExecutor {
             let data: serde_json::Value = resp.json().await?;
             let order = data.get("order").ok_or("Missing order in response")?;
             let status = order.get("status").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
-            let fill_count = order.get("fill_count").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let fill_count = order.get("fill_count")
+                .and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)))
+                .unwrap_or(0) as i32;
             Ok((status, fill_count))
         } else {
             let err_text = resp.text().await?;

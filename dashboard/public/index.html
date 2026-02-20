@@ -204,11 +204,23 @@
             <div class="glass-panel col-span-8 row-span-3 flex flex-col overflow-hidden">
                 <div class="px-6 py-4 border-b border-slate-800/50 flex justify-between items-center bg-slate-900/30">
                     <h3 class="font-medium text-slate-300">Live Signals</h3>
-                    <div class="flex items-center gap-2">
-                        <span class="text-xs text-slate-500 uppercase tracking-wide">Filter Executed</span>
-                        <div class="switch">
-                            <input type="checkbox" id="executed-filter" onchange="toggleFilter()">
-                            <span class="slider"></span>
+                    <div class="flex items-center gap-4">
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs text-slate-500 uppercase tracking-wide">Min value</span>
+                            <select id="min-value-filter" onchange="toggleFilter()" class="text-xs bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-300">
+                                <option value="">All</option>
+                                <option value="10000">$10k+</option>
+                                <option value="20000" selected>$20k+</option>
+                                <option value="25000">$25k+</option>
+                                <option value="50000">$50k+</option>
+                            </select>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs text-slate-500 uppercase tracking-wide">Executed only</span>
+                            <div class="switch">
+                                <input type="checkbox" id="executed-filter" onchange="toggleFilter()">
+                                <span class="slider"></span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -300,7 +312,7 @@
     </div>
 
     <!-- Logic -->
-    <script src="app.js?v=premium_1"></script>
+    <script src="app.js?v=3"></script>
 </body>
 
 </html>

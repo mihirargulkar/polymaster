@@ -64,5 +64,16 @@ Visualize whale alerts and market sentiment as they happen.
 
 ---
 
+## 🔔 Discord Alerts (Trades Only)
+
+Polymaster sends Discord/webhook alerts **only for filled Kalshi trades**. Whale alerts (Polymarket signals) are never sent to Discord from this app.
+
+- **Identifying our alerts**: Filled-trade alerts include `Polymaster • Filled Trade` in the footer.
+- **Non-trade alerts**: If you see Discord alerts that are not filled trades, they come from **outside this repo**—e.g. n8n, Zapier, or Make workflows that poll `/api/signals` or the database and forward to Discord. To stop those, edit your automation to either:
+  - Remove the workflow that polls and forwards, or
+  - Use `/api/executed-trades` instead of `/api/signals` so only executed trades are forwarded.
+
+---
+
 ## ⚖️ License & Disclaimer
 This tool is for informational and research purposes only. Use this data solely for informed decision-making and market analysis.

@@ -125,73 +125,8 @@ struct EventDataNested {
 #[derive(Debug, Deserialize)]
 struct EventsNestedResponse {
     events: Vec<EventDataNested>,
-}
-
-// ── Sport team detection for targeted series queries ─────────────────────
-
-static NBA_TEAMS: &[&str] = &[
-    "hawks", "celtics", "nets", "hornets", "bulls", "cavaliers", "cavs",
-    "mavericks", "mavs", "nuggets", "pistons", "warriors", "rockets",
-    "pacers", "clippers", "lakers", "grizzlies", "heat", "bucks",
-    "timberwolves", "wolves", "pelicans", "knicks", "thunder", "magic",
-    "76ers", "sixers", "suns", "blazers", "kings", "spurs", "raptors",
-    "jazz", "wizards",
-];
-
-static NFL_TEAMS: &[&str] = &[
-    "patriots", "chiefs", "eagles", "cowboys", "49ers", "niners",
-    "packers", "steelers", "bills", "ravens", "bengals", "dolphins",
-    "jets", "titans", "colts", "jaguars", "texans", "broncos",
-    "chargers", "raiders", "seahawks", "rams", "commanders", "bears",
-    "lions", "vikings", "saints", "falcons", "panthers", "buccaneers",
-    "bucs",
-];
-
-static NHL_TEAMS: &[&str] = &[
-    "bruins", "blackhawks", "canadiens", "habs", "flames", "hurricanes",
-    "avalanche", "stars", "red wings", "oilers", "penguins", "flyers",
-    "lightning", "maple leafs", "canucks", "capitals", "predators",
-    "devils", "islanders", "rangers", "senators", "sabres", "kraken",
-    "sharks", "blues", "wild", "ducks",
-];
-
-static MLB_TEAMS: &[&str] = &[
-    "yankees", "mets", "dodgers", "braves", "astros", "phillies",
-    "padres", "mariners", "guardians", "orioles", "twins", "rays",
-    "royals", "brewers", "diamondbacks", "cubs", "reds", "angels",
-    "white sox", "red sox", "tigers", "rockies", "pirates", "marlins",
-    "blue jays",
-];
-
-fn detect_series_tickers(title: &str) -> Vec<&'static str> {
-    let lower = title.to_lowercase();
-    let mut series = Vec::new();
-
-    if lower.contains("nba") || lower.contains("basketball")
-        || NBA_TEAMS.iter().any(|t| lower.contains(t))
-    {
-        series.push("KXNBAGAME");
-    }
-    if lower.contains("nfl") || NFL_TEAMS.iter().any(|t| lower.contains(t)) {
-        series.push("KXNFLGAME");
-    }
-    if lower.contains("nhl") || lower.contains("hockey")
-        || NHL_TEAMS.iter().any(|t| lower.contains(t))
-    {
-        series.push("KXNHLGAME");
-    }
-    if lower.contains("mlb") || lower.contains("baseball")
-        || MLB_TEAMS.iter().any(|t| lower.contains(t))
-    {
-        series.push("KXMLBGAME");
-    }
-    if lower.contains("soccer") || lower.contains("football club")
-        || lower.contains(" fc ") || lower.contains(" fc,")
-    {
-        series.push("KXSOCCER");
-    }
-
-    series
+    #[serde(default)]
+    cursor: Option<String>,
 }
 
 fn collect_markets_from_events(
@@ -221,63 +156,55 @@ fn collect_markets_from_events(
     }
 }
 
-/// On-demand search: query Kalshi for markets relevant to a Polymarket title.
-/// Uses targeted series queries for sports and a general events fetch otherwise.
-pub async fn search_markets(poly_title: &str) -> Result<Vec<MarketInfo>, KalshiError> {
+/// Fetch all open events with pagination. Bulletproof: gets every open market on Kalshi.
+async fn fetch_all_open_events() -> Result<Vec<MarketInfo>, KalshiError> {
     let events_url = "https://api.elections.kalshi.com/trade-api/v2/events";
-
-    let series = detect_series_tickers(poly_title);
     let mut all_markets = Vec::new();
-    let mut seen_tickers = std::collections::HashSet::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut cursor: Option<String> = None;
 
-    for s in &series {
-        let resp = shared_client()
-            .get(events_url)
-            .query(&[
-                ("series_ticker", *s),
-                ("status", "open"),
-                ("limit", "100"),
-                ("with_nested_markets", "true"),
-            ])
-            .send()
-            .await;
-
-        if let Ok(resp) = resp {
-            if resp.status().is_success() {
-                if let Ok(text) = resp.text().await {
-                    if let Ok(data) = serde_json::from_str::<EventsNestedResponse>(&text) {
-                        collect_markets_from_events(data.events, &mut seen_tickers, &mut all_markets);
-                    }
-                }
-            }
+    loop {
+        let mut query: Vec<(&str, String)> = vec![
+            ("status", "open".into()),
+            ("limit", "200".into()),
+            ("with_nested_markets", "true".into()),
+        ];
+        if let Some(ref c) = cursor {
+            query.push(("cursor", c.clone()));
         }
-    }
 
-    if series.is_empty() || all_markets.is_empty() {
         let resp = shared_client()
             .get(events_url)
-            .query(&[
-                ("status", "open"),
-                ("limit", "200"),
-                ("with_nested_markets", "true"),
-            ])
+            .query(&query)
             .send()
             .await?;
+        if !resp.status().is_success() {
+            break;
+        }
+        let text = resp.text().await?;
+        let data: EventsNestedResponse = serde_json::from_str(&text)
+            .map_err(|e| KalshiError::ParseError(e.to_string()))?;
 
-        if resp.status().is_success() {
-            if let Ok(text) = resp.text().await {
-                if let Ok(data) = serde_json::from_str::<EventsNestedResponse>(&text) {
-                    collect_markets_from_events(data.events, &mut seen_tickers, &mut all_markets);
-                }
-            }
+        collect_markets_from_events(data.events, &mut seen, &mut all_markets);
+
+        cursor = data.cursor.and_then(|c| if c.is_empty() { None } else { Some(c) });
+        if cursor.is_none() {
+            break;
         }
     }
 
+    Ok(all_markets)
+}
+
+/// On-demand search: query Kalshi for markets relevant to a Polymarket title.
+/// Bulletproof: paginates through ALL open events — no hardcoded series, never miss a market.
+pub async fn search_markets(poly_title: &str) -> Result<Vec<MarketInfo>, KalshiError> {
+    let all_markets = fetch_all_open_events().await?;
+
     println!(
-        "🔍 On-demand search for \"{}\" → {} markets (series: {:?})",
+        "🔍 On-demand search for \"{}\" → {} markets (all open, paginated)",
         poly_title,
-        all_markets.len(),
-        if series.is_empty() { vec!["general"] } else { series.iter().copied().collect() }
+        all_markets.len()
     );
 
     Ok(all_markets)

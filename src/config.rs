@@ -59,15 +59,15 @@ pub struct Config {
     /// Hard cap on any single bet in dollars (default $10).
     #[serde(default = "default_max_bet_cap")]
     pub max_bet_cap: f64,
-    /// Maximum simultaneous open positions (default 5).
-    #[serde(default = "default_max_open_positions")]
-    pub max_open_positions: usize,
     /// Daily stop-loss as a fraction of day-start balance (default 0.10 = 10%).
     #[serde(default = "default_daily_loss_limit")]
     pub daily_loss_limit: f64,
     /// Minimum bankroll reserve as a fraction of day-start balance (default 0.20 = 20%).
     #[serde(default = "default_reserve_fraction")]
     pub reserve_fraction: f64,
+    /// Minimum whale win rate (0.0–1.0) to copy. Default 0.65 = 65%. Lower = more trades, higher risk.
+    #[serde(default = "default_min_whale_win_rate")]
+    pub min_whale_win_rate: f64,
 }
 
 fn default_categories() -> Vec<String> {
@@ -122,16 +122,16 @@ fn default_max_bet_cap() -> f64 {
     10.0
 }
 
-fn default_max_open_positions() -> usize {
-    5
-}
-
 fn default_daily_loss_limit() -> f64 {
     0.10
 }
 
 fn default_reserve_fraction() -> f64 {
     0.20
+}
+
+fn default_min_whale_win_rate() -> f64 {
+    0.65
 }
 
 fn config_path() -> Result<PathBuf, Box<dyn std::error::Error>> {

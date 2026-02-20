@@ -87,7 +87,10 @@ async function fetchData() {
 
         // 2. Get Recent Signals (The Feed)
         const filterEnabled = document.getElementById('executed-filter').checked;
-        const signalsRes = await fetch(`/api/signals?limit=50${filterEnabled ? '&filter=executed' : ''}`);
+        const minValue = document.getElementById('min-value-filter')?.value || '';
+        let signalsUrl = `/api/signals?limit=50${filterEnabled ? '&filter=executed' : ''}`;
+        if (minValue) signalsUrl += `&minValue=${minValue}`;
+        const signalsRes = await fetch(signalsUrl, { cache: 'no-store' });
         const signals = await signalsRes.json();
         renderFeed(signals);
 

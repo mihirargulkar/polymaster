@@ -23,11 +23,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Watch for large transactions (default threshold: $25,000)
+    /// Watch for large transactions (uses config threshold from setup, or $25,000 default)
     Watch {
-        /// Minimum transaction size to alert on (in USD)
-        #[arg(short, long, default_value = "25000")]
-        threshold: u64,
+        /// Minimum transaction size to alert on (in USD). Overrides config.
+        #[arg(short, long)]
+        threshold: Option<u64>,
 
         /// Polling interval in seconds
         #[arg(short, long, default_value = "5")]
@@ -60,6 +60,8 @@ enum Commands {
         /// Wallet ID to fetch profile for
         wallet_id: String,
     },
+    /// Show Kalshi open positions and balance
+    Positions,
 }
 
 #[tokio::main]
@@ -83,8 +85,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             threshold,
             interval,
         } => {
+            let effective_threshold = threshold.unwrap_or_else(|| {
+                config::load_config()
+                    .ok()
+                    .map(|c| c.threshold)
+                    .unwrap_or(25000)
+            });
             let conn = Arc::new(Mutex::new(conn));
-            commands::watch::watch_whales(threshold, interval, conn).await?;
+            commands::watch::watch_whales(effective_threshold, interval, conn).await?;
         }
         Commands::History {
             limit,
@@ -101,6 +109,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::TestProfile { wallet_id } => {
             commands::test::test_profile(&wallet_id).await?;
+        }
+        Commands::Positions => {
+            commands::positions::show_positions().await?;
         }
     }
 

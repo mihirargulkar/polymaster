@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
 
-const DEFAULT_TOP_K: usize = 15;
+const DEFAULT_TOP_K: usize = 25;
 const CACHE_TTL_SECS: u64 = 3600;
 
 // ── Types ───────────────────────────────────────────────────────────────
@@ -77,6 +77,8 @@ static STOP_WORDS: &[&str] = &[
     "will", "the", "and", "for", "that", "this", "with", "from", "are",
     "was", "been", "have", "has", "had", "its", "but", "not", "they",
     "you", "price", "market", "outcome",
+    "open",  // Too generic: matches IPO, OpenAI, etc. — tennis "Open" still matches via delray/beach/player names
+    "down",  // Matches "shutdowns" (KXNUMSHUTDOWNS). Bitcoin "Up or Down" still matches via bitcoin/btc.
 ];
 
 static EXPANSIONS: &[(&str, &[&str])] = &[
@@ -93,8 +95,18 @@ static EXPANSIONS: &[(&str, &[&str])] = &[
     ("nfl", &["football"]),
     ("mlb", &["baseball"]),
     ("nhl", &["hockey"]),
+    ("usa", &["united", "states"]),
+    ("slovakia", &["svk"]),
+    ("canada", &["can"]),
+    ("iihf", &["international", "hockey"]),
     ("o/u", &["over", "under"]),
     ("fc", &["football", "club"]),
+    // Soccer: Polymarket uses full names, Kalshi often uses city/short names
+    ("athletic", &["bilbao"]),
+    ("bilbao", &["athletic"]),
+    // Tennis: tournament names → ATP/WTA for better matching
+    ("delray", &["tennis", "atp"]),
+    ("cobolli", &["tennis"]),
     // NBA team ↔ city mappings (Polymarket uses team names, Kalshi uses cities)
     ("hawks", &["atlanta"]),
     ("celtics", &["boston", "bos"]),
@@ -139,6 +151,11 @@ pub fn expand_keywords(title: &str) -> Vec<String> {
         .filter(|w| w.len() > 2)
         .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_string())
         .filter(|w| !w.is_empty())
+        .filter(|w| {
+            // Exclude 2-digit numbers (20, 25, 35, 40) — they match KXNUMSHUTDOWNS-T2, venue IDs
+            // Keep "100", "2026" etc. which can be meaningful
+            !(w.len() == 2 && w.chars().all(|c| c.is_ascii_digit()))
+        })
         .collect();
 
     let originals = words.clone();
@@ -440,6 +457,9 @@ IMPORTANT SPORTS CONTEXT: In prediction markets, the same game is often listed w
 - Polymarket uses team NICKNAMES: "Celtics vs. Warriors", "Nuggets vs. Clippers"
 - Kalshi uses CITY names: "Boston at Golden State Winner?", "Denver at Los Angeles C Winner?"
 - These are the SAME events if the teams match!
+- For international hockey (IIHF): "USA vs. Slovakia", "Men's Semifinals" = Kalshi IIHF markets with country names (USA, Slovakia). Same countries = same event.
+- For soccer: "Athletic Club" = "Bilbao" = ATH (Athletic Bilbao). KXLALIGA-26-ATH, KXCOPADELREY-26-ATH = Athletic Club. NOT golf.
+- For Bitcoin: "Bitcoin Up or Down" = KXBTC15M series (15-min price markets). Match by time window.
 
 RULES:
 1. The Polymarket event and the Kalshi market MUST be about the SAME specific real-world event.

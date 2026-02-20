@@ -2,7 +2,6 @@ const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const cors = require('cors');
-const axios = require('axios');
 
 const app = express();
 const PORT = 3000;
@@ -21,7 +20,6 @@ const db = new sqlite3.Database(DB_PATH, sqlite3.OPEN_READWRITE, (err) => {
     }
 });
 
-const DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1474068603908264048/SwSv0asWyBz9xyH8Uu_j1uxpKeqbF6Ytg6Nnd4SGF7qKsMXlDvM4bONpxOfOOb38ggh8';
 app.use(express.json());
 
 app.use(cors());
@@ -36,17 +34,26 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // API: Get Recent Whale Signals (Polymarket)
 app.get('/api/signals', (req, res) => {
-    const limit = req.query.limit || 50;
+    const limit = parseInt(req.query.limit, 10) || 50;
     const filter = req.query.filter; // e.g., 'executed'
+    const minValue = parseFloat(req.query.minValue);
 
     let query = "SELECT *, market_id as asset_id FROM alerts";
-    let params = [limit];
+    const conditions = [];
+    const params = [];
 
     if (filter === 'executed') {
-        query += " WHERE shadow_bet_amount > 0";
+        conditions.push("shadow_bet_amount > 0");
     }
-
+    if (!isNaN(minValue) && minValue > 0) {
+        conditions.push("value >= ?");
+        params.push(minValue);
+    }
+    if (conditions.length > 0) {
+        query += " WHERE " + conditions.join(" AND ");
+    }
     query += " ORDER BY id DESC LIMIT ?";
+    params.push(limit);
 
     db.all(query, params, (err, rows) => {
         if (err) {
@@ -173,48 +180,6 @@ app.get('/api/stats', (req, res) => {
             });
         });
     });
-});
-
-// DISCORD WEBHOOK BRIDGE
-app.post('/webhook/whale-alerts', async (req, res) => {
-    try {
-        const data = req.body;
-        console.log(`[${new Date().toISOString()}] Received alert: ${data.market_title}`);
-
-        // Determine color based on action (BUY/EXECUTING: Green, SELL: Red)
-        const color = (data.side === 'yes' || data.action === 'BUY' || data.side === 'BUY') ? 0x27ae60 : 0xe74c3c;
-
-        // Format large numbers
-        const formatUSD = (val) => val ? `$${Number(val).toLocaleString()}` : 'N/A';
-
-        // Create the embed
-        const embed = {
-            title: `${data.platform} Execution Alert`,
-            url: data.platform === 'Polymarket' ? 'https://polymarket.com' : 'https://kalshi.com',
-            description: `**${data.market_title}**\n${data.side || data.action} shares`,
-            color: color,
-            fields: [
-                { name: 'Value', value: formatUSD(data.value), inline: true },
-                { name: 'Price', value: `${(data.price * 100).toFixed(1)}%`, inline: true },
-                { name: 'Size', value: `${Number(data.size).toLocaleString()} shares`, inline: true },
-            ],
-            timestamp: new Date().toISOString(),
-            footer: { text: 'Polymaster Whale Watcher' }
-        };
-
-        if (data.wallet_activity) {
-            let walletDesc = `\`${data.wallet_id.substring(0, 10)}...\`\n`;
-            walletDesc += `Txns (1h/24h): ${data.wallet_activity.transactions_last_hour} / ${data.wallet_activity.transactions_last_day}\n`;
-            walletDesc += `Vol (24h): ${formatUSD(data.wallet_activity.total_value_day)}`;
-            embed.fields.push({ name: 'Wallet Activity', value: walletDesc, inline: false });
-        }
-
-        await axios.post(DISCORD_WEBHOOK_URL, { embeds: [embed] });
-        res.sendStatus(200);
-    } catch (err) {
-        console.error('Error forwarding to Discord:', err.message);
-        res.status(500).send(err.message);
-    }
 });
 
 app.listen(PORT, () => {

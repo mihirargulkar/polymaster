@@ -107,6 +107,7 @@
                         <th class="w-24">Bet</th>
                         <th class="w-24">Price</th>
                         <th class="w-24">Stake</th>
+                        <th class="w-24">Result</th>
                         <th class="w-32">Status</th>
                         <th class="w-32">Settled</th>
                         <th class="w-32 text-right pr-6">PnL</th>
@@ -114,7 +115,7 @@
                 </thead>
                 <tbody id="tradesBody">
                     <tr>
-                        <td colspan="9" class="text-center py-20 text-slate-500 font-light">Loading trade history...
+                        <td colspan="10" class="text-center py-20 text-slate-500 font-light">Loading trade history...
                         </td>
                     </tr>
                 </tbody>
@@ -130,34 +131,45 @@
                 renderTable(trades);
             } catch (e) {
                 console.error("Failed to load trades", e);
-                document.getElementById('tradesBody').innerHTML = `<tr><td colspan="9" class="text-center py-20 text-rose-400">Error loading data. Check console.</td></tr>`;
+                document.getElementById('tradesBody').innerHTML = `<tr><td colspan="10" class="text-center py-20 text-rose-400">Error loading data. Check console.</td></tr>`;
             }
         }
 
         function renderTable(trades) {
             const tbody = document.getElementById('tradesBody');
             if (!trades || trades.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="9" class="text-center py-20 text-slate-500">No executed trades found in database.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="10" class="text-center py-20 text-slate-500">No executed trades found in database.</td></tr>`;
                 return;
             }
 
             let html = '';
             trades.forEach(t => {
-                const pnl = t.pnl_value || 0;
+                const pnl = t.pnl_value ?? 0;
+                const hasSettled = t.status === 'SETTLED' || t.settled_outcome != null || t.pnl_value != null;
                 let pnlClass = 'text-pending';
                 let statusLabel = t.status || 'OPEN';
                 let rowBg = '';
+                let resultLabel = 'PENDING';
+                let resultClass = 'text-pending';
 
-                // Determine Row Color
-                if (statusLabel === 'SETTLED') {
+                // Determine Result (WON/LOST/PUSH) from pnl_value or settled_outcome
+                if (hasSettled) {
                     if (pnl > 0) {
+                        resultLabel = 'WON';
+                        resultClass = 'text-win font-bold';
                         pnlClass = 'text-win font-bold';
                         rowBg = 'bg-emerald-500/5';
                     } else if (pnl < 0) {
+                        resultLabel = 'LOST';
+                        resultClass = 'text-loss font-bold';
                         pnlClass = 'text-loss font-bold';
                         rowBg = 'bg-rose-500/5';
-                    } else {
+                    } else if (t.settled_outcome) {
+                        resultLabel = 'PUSH';
+                        resultClass = 'text-slate-400';
                         pnlClass = 'text-slate-400';
+                    } else {
+                        resultLabel = 'PENDING';
                     }
                 }
 
@@ -174,8 +186,9 @@
                             ${(t.market_title || 'Unknown').substring(0, 70)}${t.market_title && t.market_title.length > 70 ? '...' : ''}
                         </td>
                         <td class="font-bold text-amber-400 text-sm">${t.outcome}</td>
-                        <td class="font-mono text-slate-300">${t.price.toFixed(2)}</td>
-                        <td class="font-mono text-slate-400">$${t.shadow_bet_amount.toFixed(2)}</td>
+                        <td class="font-mono text-slate-300">${(t.price || 0).toFixed(2)}</td>
+                        <td class="font-mono text-slate-400">$${(t.shadow_bet_amount || 0).toFixed(2)}</td>
+                        <td class="font-bold ${resultClass}">${resultLabel}</td>
                         <td>
                             <span class="text-[10px] uppercase tracking-wider font-bold px-2 py-1 rounded bg-slate-800 text-slate-400 border border-slate-700">
                                 ${statusLabel}
@@ -193,12 +206,12 @@
 
         function downloadCSV() {
             const rows = [];
-            rows.push(["ID", "Time", "Market", "Bet", "Price", "Stake", "Status", "Settled", "PnL"]);
+            rows.push(["ID", "Time", "Market", "Bet", "Price", "Stake", "Result", "Status", "Settled", "PnL"]);
             
             const trs = document.querySelectorAll('#tradesBody tr');
             trs.forEach(tr => {
                 const cells = tr.querySelectorAll('td');
-                if(cells.length < 9) return; 
+                if(cells.length < 10) return; 
                 const row = [
                     cells[0].innerText.replace('#',''),
                     cells[1].innerText,
@@ -207,8 +220,9 @@
                     cells[4].innerText,
                     cells[5].innerText.replace('$',''),
                     cells[6].innerText.trim(),
-                    cells[7].innerText,
-                    cells[8].innerText
+                    cells[7].innerText.trim(),
+                    cells[8].innerText,
+                    cells[9].innerText
                 ];
                 rows.push(row.join(','));
             });

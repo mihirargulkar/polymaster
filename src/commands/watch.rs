@@ -201,12 +201,12 @@ pub async fn watch_whales(threshold: u64, interval: u64, conn: Arc<Mutex<Connect
     let mut whale_cache = whale_profile::WhaleProfileCache::new();
 
     // ── Risk management state (reloaded each prune cycle) ─────────────────
-    let mut max_open = config.as_ref().map(|c| c.max_open_positions).unwrap_or(5);
     let mut daily_loss_frac = config.as_ref().map(|c| c.daily_loss_limit).unwrap_or(0.10);
     let mut reserve_frac = config.as_ref().map(|c| c.reserve_fraction).unwrap_or(0.20);
     let mut max_bet_frac = config.as_ref().map(|c| c.max_bet_fraction).unwrap_or(0.02);
     let mut max_bet_cap = config.as_ref().map(|c| c.max_bet_cap).unwrap_or(10.0);
     let mut max_entry_cents: i64 = config.as_ref().map(|c| c.max_entry_price_cents).unwrap_or(97);
+    let mut min_whale_win_rate: f64 = config.as_ref().map(|c| c.min_whale_win_rate).unwrap_or(0.65);
     let mut day_start_balance_cents: Option<i64> = None;
     let mut daily_loss_cents: i64 = 0;
     let mut current_trading_day = chrono::Utc::now().date_naive();
@@ -315,12 +315,12 @@ pub async fn watch_whales(threshold: u64, interval: u64, conn: Arc<Mutex<Connect
 
             // Reload config (risk params, categories, platforms)
             config = crate::config::load_config().ok();
-            max_open = config.as_ref().map(|c| c.max_open_positions).unwrap_or(5);
             daily_loss_frac = config.as_ref().map(|c| c.daily_loss_limit).unwrap_or(0.10);
             reserve_frac = config.as_ref().map(|c| c.reserve_fraction).unwrap_or(0.20);
             max_bet_frac = config.as_ref().map(|c| c.max_bet_fraction).unwrap_or(0.02);
             max_bet_cap = config.as_ref().map(|c| c.max_bet_cap).unwrap_or(10.0);
             max_entry_cents = config.as_ref().map(|c| c.max_entry_price_cents).unwrap_or(97);
+            min_whale_win_rate = config.as_ref().map(|c| c.min_whale_win_rate).unwrap_or(0.65);
             selected_categories = config.as_ref().map(|c| c.categories.clone()).unwrap_or_else(|| vec!["all".into()]);
             selected_platforms = config.as_ref().map(|c| c.platforms.clone()).unwrap_or_else(|| vec!["all".into()]);
             watch_polymarket = selected_platforms.iter().any(|p| p == "all" || p == "polymarket");
@@ -618,14 +618,15 @@ pub async fn watch_whales(threshold: u64, interval: u64, conn: Arc<Mutex<Connect
                             // ═══ RISK-MANAGED EXECUTION PIPELINE ═══════════════
                             let whale_win_rate = wp.as_ref().and_then(|p| p.win_rate);
 
-                            // Gate 1: Win rate
+                            // Gate 1: Win rate (configurable threshold)
+                            let min_wr_pct = min_whale_win_rate * 100.0;
                             let passes_win_rate = match whale_win_rate {
-                                Some(wr) if wr >= 0.85 => {
-                                    println!("✅ Whale win rate {:.1}% passes 85% threshold", wr * 100.0);
+                                Some(wr) if wr >= min_whale_win_rate => {
+                                    println!("✅ Whale win rate {:.1}% passes {:.0}% threshold", wr * 100.0, min_wr_pct);
                                     true
                                 }
                                 Some(wr) => {
-                                    println!("⚠️ Skipping execution: whale win rate {:.1}% < 85%", wr * 100.0);
+                                    println!("⚠️ Skipping execution: whale win rate {:.1}% < {:.0}%", wr * 100.0, min_wr_pct);
                                     false
                                 }
                                 None => {
@@ -659,12 +660,7 @@ pub async fn watch_whales(threshold: u64, interval: u64, conn: Arc<Mutex<Connect
                                         println!("⚠️ Already have position on event {} — skipping",
                                             dedup_key);
                                     }
-                                    // Gate 3: Max open positions
-                                    else if executed_tickers.len() >= max_open {
-                                        println!("⚠️ Max {} open positions reached — skipping {}",
-                                            max_open, match_result.ticker);
-                                    }
-                                    // Gate 4: 24h expiry + fetch Kalshi live price
+                                    // Gate 3: 24h expiry + fetch Kalshi live price
                                     else if let Some(snapshot) = fetch_kalshi_market_snapshot(&match_result.ticker).await {
                                     if !snapshot.closes_within_24h {
                                         println!("⚠️ Skipping {}: does not close within 24 hours",
@@ -796,30 +792,32 @@ pub async fn watch_whales(threshold: u64, interval: u64, conn: Arc<Mutex<Connect
                                                         .ok();
                                                     }
 
-                                                    // Poll for fill (5 attempts, 2s apart) — only count daily loss & send Discord when filled
-                                                    let mut filled = false;
-                                                    for attempt in 1..=5 {
+                                                    // Poll for fill (15 attempts, 2s apart = 30s) — Discord ONLY when we get fills
+                                                    let mut filled_count: i32 = 0;
+                                                    for attempt in 1..=15 {
                                                         tokio::time::sleep(Duration::from_secs(2)).await;
-                                                        if let Ok((status, fill_count)) = executor.get_order_status(&order_id).await {
-                                                            if status == "executed" || fill_count >= count {
-                                                                filled = true;
-                                                                println!("✅ Order {} filled ({} contracts)", order_id, fill_count);
+                                                        if let Ok((status, fc)) = executor.get_order_status(&order_id).await {
+                                                            filled_count = fc;
+                                                            if status == "executed" || fc >= count {
                                                                 break;
                                                             }
                                                             if status == "canceled" {
+                                                                filled_count = 0;
                                                                 println!("⚠️ Order {} was canceled", order_id);
                                                                 break;
                                                             }
-                                                            if attempt < 5 {
-                                                                println!("   Poll {}/5: status={} fill_count={} — waiting...", attempt, status, fill_count);
+                                                            if attempt < 15 {
+                                                                println!("   Poll {}/15: status={} fill_count={} — waiting...", attempt, status, fc);
                                                             }
                                                         }
                                                     }
-                                                    if !filled {
-                                                        println!("⚠️ Order {} not yet filled after 10s — not counting against daily loss", order_id);
+                                                    if filled_count == 0 {
+                                                        println!("⚠️ Order {} not filled after 30s — no Discord alert (resting/canceled)", order_id);
                                                     } else {
-                                                        daily_loss_cents += trade_cost_cents;
-                                                        let balance_after = balance_cents.saturating_sub(total_cost_with_fees);
+                                                        let actual_count = filled_count.min(count);
+                                                        let actual_cost_cents = (actual_count as i64) * price_cents + (actual_count as i64) * fee_cents;
+                                                        daily_loss_cents += (actual_count as i64) * price_cents;
+                                                        let balance_after = balance_cents.saturating_sub(actual_cost_cents);
                                                         if let Some(ref cfg) = config {
                                                             let url = cfg.webhook_url.as_ref()
                                                                 .or(cfg.discord_webhook_url.as_ref());
@@ -827,10 +825,10 @@ pub async fn watch_whales(threshold: u64, interval: u64, conn: Arc<Mutex<Connect
                                                                 let exec_alert = crate::alerts::webhook::ExecutionAlert {
                                                                     kalshi_ticker: match_result.ticker.clone(),
                                                                     side: match_result.side.clone(),
-                                                                    count,
+                                                                    count: actual_count,
                                                                     price_cents,
                                                                     fee_cents,
-                                                                    total_cost_cents: total_cost_with_fees,
+                                                                    total_cost_cents: actual_cost_cents,
                                                                     ev_cents,
                                                                     kelly_pct: kelly_frac * 100.0,
                                                                     whale_win_rate: wr,
@@ -838,7 +836,7 @@ pub async fn watch_whales(threshold: u64, interval: u64, conn: Arc<Mutex<Connect
                                                                     poly_title: poly_title.to_string(),
                                                                     order_id: order_id.to_string(),
                                                                 };
-                                                                println!("📨 Sending execution alert...");
+                                                                println!("📨 Sending execution alert ({} filled)...", actual_count);
                                                                 crate::alerts::webhook::send_execution_alert(url, &exec_alert).await;
                                                             }
                                                         }

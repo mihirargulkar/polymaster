@@ -427,9 +427,9 @@ pub async fn setup_config() -> Result<(), Box<dyn std::error::Error>> {
         max_entry_price_cents: existing.max_entry_price_cents,
         max_bet_fraction: existing.max_bet_fraction,
         max_bet_cap: existing.max_bet_cap,
-        max_open_positions: existing.max_open_positions,
         daily_loss_limit: existing.daily_loss_limit,
         reserve_fraction: existing.reserve_fraction,
+        min_whale_win_rate: existing.min_whale_win_rate,
     };
 
     crate::config::save_config(&config)?;
