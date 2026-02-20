@@ -79,6 +79,7 @@ pub async fn test_webhook(conn: &rusqlite::Connection) -> Result<(), Box<dyn std
     let buy_alert = AlertData {
         platform: "Polymarket",
         market_title: Some("yes Michigan St.,yes Saint Peter's,yes Harvard wins by over 5.5 Points,no Iona wins by over 5.5 Points,no Boise St. wins by over 9.5 Points"),
+        market_id: None,
         outcome: Some("Yes"),
         side: "BUY",
         value: 250000.0,
@@ -104,6 +105,7 @@ pub async fn test_webhook(conn: &rusqlite::Connection) -> Result<(), Box<dyn std
     let sell_alert = AlertData {
         platform: "Kalshi",
         market_title: Some("Bitcoin price on Jan 16, 2026?"),
+        market_id: None,
         outcome: Some("Bitcoin (BTC) price < $96999.99 at expiry"),
         side: "SELL",
         value: 35000.0,
@@ -134,6 +136,32 @@ pub async fn test_webhook(conn: &rusqlite::Connection) -> Result<(), Box<dyn std
     println!("    - alert_type: WHALE_EXIT");
     println!("    - action: SELL");
     println!("    - value: $35,000");
+
+    Ok(())
+}
+
+pub async fn test_profile(wallet_id: &str) -> Result<(), Box<dyn std::error::Error>> {
+    println!("{}", format!("TESTING WHALE PROFILE: {}", wallet_id).bright_cyan().bold());
+    println!();
+
+    let mut cache = crate::whale_profile::WhaleProfileCache::new();
+    
+    println!("Fetching live profile from Polymarket Data API...");
+    match crate::whale_profile::fetch_whale_profile(wallet_id, &mut cache).await {
+        Some(profile) => {
+            println!("{}", "✅ Profile Fetched Successfully".bright_green());
+            println!("{:#?}", profile);
+            
+            if let Some(wr) = profile.win_rate {
+                println!("Win Rate: {:.1}%", wr * 100.0);
+            } else {
+                println!("Win Rate: N/A");
+            }
+        }
+        None => {
+            println!("{}", "❌ Failed to fetch profile".bright_red());
+        }
+    }
 
     Ok(())
 }

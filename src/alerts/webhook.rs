@@ -20,11 +20,21 @@ pub fn escape_special_chars(s: &str) -> String {
 pub async fn send_webhook_alert(webhook_url: &str, alert: &AlertData<'_>) {
     let payload = super::build_alert_payload(alert, true);
 
-    let client = reqwest::Client::builder()
+    let client = match reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
         .timeout(std::time::Duration::from_secs(5))
         .build()
-        .unwrap();
+    {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!(
+                "{} Failed to create webhook client: {}",
+                "[WEBHOOK ERROR]".red(),
+                e
+            );
+            return;
+        }
+    };
 
     match client.post(webhook_url).json(&payload).send().await {
         Ok(response) => {

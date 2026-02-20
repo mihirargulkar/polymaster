@@ -7,6 +7,7 @@ mod platforms;
 mod types;
 mod whale_profile;
 mod ws;
+mod execution;
 
 use clap::{Parser, Subcommand};
 
@@ -52,6 +53,11 @@ enum Commands {
     TestSound,
     /// Test webhook notification
     TestWebhook,
+    /// Test whale profile fetching
+    TestProfile {
+        /// Wallet ID to fetch profile for
+        wallet_id: String,
+    },
 }
 
 #[tokio::main]
@@ -89,6 +95,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::TestWebhook => {
             commands::test::test_webhook(&conn).await?;
+        }
+        Commands::TestProfile { wallet_id } => {
+            commands::test::test_profile(&wallet_id).await?;
         }
     }
 

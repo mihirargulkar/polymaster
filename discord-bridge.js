@@ -1,10 +1,11 @@
 const express = require('express');
 const axios = require('axios');
+const db = require('./whale-db-manager');
 const app = express();
 app.use(express.json());
 
 // YOUR DISCORD WEBHOOK URL
-const DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1471972284020428984/WJvx_yiUR4jF9S1PsPJBi1JtpoINFAG3sWHYTHQF8mXRszSH2wBxr-PrqPLpovxW_b0u';
+const DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1474068603908264048/SwSv0asWyBz9xyH8Uu_j1uxpKeqbF6Ytg6Nnd4SGF7qKsMXlDvM4bONpxOfOOb38ggh8';
 
 app.post('/webhook/whale-alerts', async (req, res) => {
   try {
@@ -69,12 +70,16 @@ app.post('/webhook/whale-alerts', async (req, res) => {
         const results = JSON.parse(searchResult);
         if (results && results.length > 0) {
           const ticker = results[0].ticker;
+          data.ticker = ticker; // Save for database
           quickTradeCommand = `\`node integration/dist/cli.js buy ${ticker} 10\``;
         }
       } catch (e) {
         // Fallback or ignore
       }
     }
+
+    // Log to Database asynchronously (now with ticker if available)
+    db.logAlert(data).catch(err => console.error('DB Logging Failed:', err));
 
     // Send to Discord
     const message = {

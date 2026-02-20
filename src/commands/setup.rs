@@ -418,6 +418,9 @@ pub async fn setup_config() -> Result<(), Box<dyn std::error::Error>> {
         history_retention_days,
         max_odds: existing.max_odds,
         min_spread: existing.min_spread,
+        bet_size: existing.bet_size,
+        kalshi_is_demo: existing.kalshi_is_demo,
+        discord_webhook_url: None,
     };
 
     crate::config::save_config(&config)?;

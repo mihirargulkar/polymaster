@@ -69,7 +69,7 @@ export class ShadowAutopilot {
                 // Fallback to default
             }
         }
-        return { tradesCount: 0, totalPnL: 0, activeTrades: [], maxTrades: 500 };
+        return { tradesCount: 0, totalPnL: 0, activeTrades: [], maxTrades: 10000 };
     }
 
     private saveState(): void {

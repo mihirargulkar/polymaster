@@ -7,7 +7,7 @@ use super::AlertData;
 use crate::db;
 
 /// Log an alert to the SQLite database and JSONL file
-pub fn log_alert(alert: &AlertData, conn: &Connection) {
+pub fn log_alert(alert: &AlertData, conn: &Connection) -> Option<i64> {
     let alert_json = super::build_alert_payload(alert, false);
 
     let wallet_activity_json = alert_json.get("wallet_activity").map(|v| v.to_string());
@@ -37,13 +37,13 @@ pub fn log_alert(alert: &AlertData, conn: &Connection) {
         alert.price,
         alert.size,
         alert.market_title,
-        None,
+        alert.market_id,
         alert.outcome,
         alert.wallet_id,
         alert.timestamp,
         market_context_json.as_deref(),
         wallet_activity_json.as_deref(),
-    );
+    )
 }
 
 pub fn show_alert_history(

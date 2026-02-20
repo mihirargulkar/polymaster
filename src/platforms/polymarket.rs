@@ -57,7 +57,8 @@ struct ActivityItem {
 pub async fn fetch_market_context(condition_id: &str) -> Option<crate::alerts::MarketContext> {
     let client = reqwest::Client::new();
     let url = format!(
-        "https://gamma-api.polymarket.com/markets?condition_ids={}",
+        "{}/markets?condition_ids={}",
+        crate::platforms::GAMMA_API_BASE,
         condition_id
     );
 
@@ -144,6 +145,10 @@ pub async fn fetch_market_context(condition_id: &str) -> Option<crate::alerts::M
         price_change_24h,
         liquidity,
         tags,
+        expiration_date: market.get("endDate")
+            .or_else(|| market.get("closedTime"))
+            .or_else(|| market.get("umaEndDate"))
+            .and_then(|v| v.as_str()).map(|s| s.to_string()),
     })
 }
 
@@ -350,7 +355,7 @@ pub async fn fetch_recent_trades(min_value: Option<u64>) -> Result<Vec<Trade>, P
                 })
             })
             .collect();
-        return Ok(trades);
+        return Ok(filter_recent_trades(trades));
     }
 
     // Try wrapped response format
@@ -387,10 +392,23 @@ pub async fn fetch_recent_trades(min_value: Option<u64>) -> Result<Vec<Trade>, P
                 })
             })
             .collect();
-        return Ok(trades);
+        return Ok(filter_recent_trades(trades));
     }
 
     // If parsing fails, return empty list rather than error
     // This allows the tool to continue working even if Polymarket API format changes
     Ok(Vec::new())
+}
+
+fn filter_recent_trades(trades: Vec<Trade>) -> Vec<Trade> {
+    let now = chrono::Utc::now();
+    trades.into_iter().filter(|t| {
+        if let Ok(ts) = chrono::DateTime::parse_from_rfc3339(&t.timestamp) {
+            let age = now.signed_duration_since(ts);
+            // Only keep trades from the last 60 minutes to ensure "live" signals
+            age.num_minutes() < 60
+        } else {
+            false
+        }
+    }).collect()
 }

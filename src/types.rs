@@ -295,6 +295,7 @@ impl Default for WalletActivity {
 
 #[derive(Debug, Clone)]
 pub struct WalletMemoryEntry {
+    #[allow(dead_code)]
     pub wallet_id: String,
     pub market_title: Option<String>,
     pub market_id: Option<String>,
@@ -302,6 +303,7 @@ pub struct WalletMemoryEntry {
     pub action: Option<String>,
     pub value: f64,
     pub price: f64,
+    #[allow(dead_code)]
     pub platform: String,
     pub seen_at: i64,
 }

@@ -80,8 +80,9 @@ struct MarketResponse {
     market: MarketData,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct MarketData {
+    ticker: String,
     title: Option<String>,
     subtitle: Option<String>,
     category: Option<String>,
@@ -90,10 +91,112 @@ struct MarketData {
 }
 
 /// Market info including title and native category
+#[derive(Clone)]
 pub struct MarketInfo {
+    pub ticker: String,
     pub title: String,
     pub category: Option<String>,
+    #[allow(dead_code)]
     pub tags: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct EventData {
+    event_ticker: String,
+    category: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct EventsResponse {
+    events: Vec<EventData>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MarketsResponse {
+    markets: Vec<MarketData>,
+}
+
+pub async fn fetch_active_markets() -> Result<Vec<MarketInfo>, KalshiError> {
+    println!("🔍 Starting fetch_active_markets via Events (paginated)...");
+    let client = reqwest::Client::new();
+    let events_url = "https://api.elections.kalshi.com/trade-api/v2/events";
+    
+    let mut all_events = Vec::new();
+    let mut cursor: Option<String> = None;
+    
+    // 1. Fetch up to 3 pages of active events (600 total) to discover "normal" markets
+    for _ in 0..3 {
+        let mut query = vec![("status", "open".to_string()), ("limit", "200".to_string())];
+        if let Some(ref c) = cursor {
+            query.push(("cursor", c.clone()));
+        }
+        
+        let events_resp = client
+            .get(events_url)
+            .query(&query)
+            .send()
+            .await?;
+            
+        if !events_resp.status().is_success() {
+            println!("  Warning: Events API failed: {}", events_resp.status());
+            break;
+        }
+        
+        let text = events_resp.text().await?;
+        let data: EventsResponse = serde_json::from_str(&text).map_err(|e| KalshiError::ParseError(e.to_string()))?;
+        
+        let count = data.events.len();
+        all_events.extend(data.events);
+        
+        // Update cursor for next page
+        // Note: The curl output showed "cursor" at top level
+        let parsed: serde_json::Value = serde_json::from_str(&text).map_err(|e| KalshiError::ParseError(e.to_string()))?;
+        if let Some(c) = parsed.get("cursor").and_then(|v| v.as_str()) {
+            if c.is_empty() { break; }
+            cursor = Some(c.to_string());
+        } else {
+            break;
+        }
+        
+        if count < 200 { break; }
+    }
+    
+    println!("  Found {} active events. Fetching markets for each...", all_events.len());
+    
+    let mut all_markets = Vec::new();
+    let markets_url = "https://api.elections.kalshi.com/trade-api/v2/markets";
+    
+    // For each event, fetch its markets
+    for event in all_events {
+        let m_resp = client
+            .get(markets_url)
+            .query(&[("event_ticker", event.event_ticker), ("status", "open".to_string())])
+            .send()
+            .await;
+            
+        if let Ok(resp) = m_resp {
+            if resp.status().is_success() {
+                if let Ok(text) = resp.text().await {
+                    if let Ok(m_data) = serde_json::from_str::<MarketsResponse>(&text) {
+                        for m in m_data.markets {
+                            // Still filter out KXMV just in case
+                            if !m.ticker.starts_with("KXMV") {
+                                all_markets.push(MarketInfo {
+                                    title: m.title.clone().or(m.subtitle.clone()).unwrap_or_else(|| "Unknown".to_string()),
+                                    category: m.category.clone().or(event.category.clone()),
+                                    tags: m.tags,
+                                    ticker: m.ticker,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    println!("  Cache status: {} markets discovered and filtered", all_markets.len());
+    Ok(all_markets)
 }
 
 pub async fn fetch_market_context(ticker: &str) -> Option<crate::alerts::MarketContext> {
@@ -163,6 +266,11 @@ pub async fn fetch_market_context(ticker: &str) -> Option<crate::alerts::MarketC
         price_change_24h,
         liquidity,
         tags,
+        expiration_date: market.get("expiration_time")
+        .or_else(|| market.get("result_v_time"))
+        .or_else(|| market.get("close_time"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string()),
     })
 }
 
@@ -264,6 +372,7 @@ pub async fn fetch_market_info_full(ticker: &str) -> Option<MarketInfo> {
                         title,
                         category: market_response.market.category,
                         tags: market_response.market.tags,
+                        ticker: market_response.market.ticker,
                     });
                 }
             }

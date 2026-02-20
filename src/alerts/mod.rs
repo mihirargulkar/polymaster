@@ -18,6 +18,7 @@ pub struct MarketContext {
     pub price_change_24h: f64,
     pub liquidity: f64,
     pub tags: Vec<String>,
+    pub expiration_date: Option<String>,
 }
 
 /// Order book depth summary
@@ -49,6 +50,7 @@ pub struct TopHolder {
 pub struct AlertData<'a> {
     pub platform: &'a str,
     pub market_title: Option<&'a str>,
+    pub market_id: Option<&'a str>,
     pub outcome: Option<&'a str>,
     pub side: &'a str,
     pub value: f64,
@@ -99,6 +101,7 @@ pub fn build_alert_payload(alert: &AlertData, escape_text: bool) -> serde_json::
         "size": alert.size,
         "timestamp": alert.timestamp,
         "market_title": market_title,
+        "market_id": alert.market_id,
         "outcome": outcome,
     });
 
@@ -127,6 +130,7 @@ pub fn build_alert_payload(alert: &AlertData, escape_text: bool) -> serde_json::
             "price_change_24h": ctx.price_change_24h,
             "liquidity": ctx.liquidity,
             "tags": ctx.tags,
+            "expiration_date": ctx.expiration_date,
         });
     }
 

@@ -9,6 +9,12 @@ pub fn wallet_hash(wallet_id: &str) -> String {
 }
 
 pub fn db_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    // Prefer local database in project root if it exists
+    let local_path = std::path::Path::new("whale_alerts.db");
+    if local_path.exists() {
+        return Ok(local_path.to_path_buf());
+    }
+
     let config_dir = dirs::config_dir().ok_or("Could not determine config directory")?;
     let wwatcher_dir = config_dir.join("wwatcher");
     std::fs::create_dir_all(&wwatcher_dir)?;
@@ -104,7 +110,7 @@ pub fn insert_alert(
     timestamp: &str,
     market_context_json: Option<&str>,
     wallet_activity_json: Option<&str>,
-) {
+) -> Option<i64> {
     let w_hash = wallet_id.map(wallet_hash);
 
     let result = conn.execute(
@@ -130,8 +136,50 @@ pub fn insert_alert(
         ],
     );
 
+    match result {
+        Ok(_) => Some(conn.last_insert_rowid()),
+        Err(e) => {
+            eprintln!("Warning: Failed to log alert to database: {}", e);
+            None
+        }
+    }
+}
+
+/// Mark an alert as executed in the database
+pub fn mark_alert_executed(
+    conn: &Connection,
+    alert_id: i64,
+    order_id: &str,
+    ticker: &str,
+    side: &str,
+    bet_amount: f64,
+    price: f64,
+) {
+    let result = conn.execute(
+        "UPDATE alerts 
+         SET live_trade_id = ?1, 
+             shadow_bet_amount = ?2,
+             status = 'EXECUTED',
+             market_id = ?3,
+             outcome = ?4,
+             price = ?5
+         WHERE id = ?6",
+        params![
+            order_id,
+            bet_amount,
+            ticker,  // Overwrite market_id with Kalshi ticker for clarity? Or keep separate?
+                     // The dashboard expects market_id to be the ticker for executed trades?
+                     // Let's use ticker for clarity if it was null.
+            side,
+            price,
+            alert_id
+        ],
+    );
+
     if let Err(e) = result {
-        eprintln!("Warning: Failed to log alert to database: {}", e);
+        eprintln!("Warning: Failed to mark alert as executed: {}", e);
+    } else {
+        println!("✅ Database updated: Alert #{} marked as EXECUTED", alert_id);
     }
 }
 
@@ -245,6 +293,7 @@ pub fn prune_wallet_memory(conn: &Connection) {
 }
 
 /// Migrate existing JSONL history to SQLite
+#[allow(dead_code)]
 pub fn migrate_jsonl_if_exists(conn: &Connection) {
     let config_dir = match dirs::config_dir() {
         Some(d) => d,

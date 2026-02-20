@@ -24,7 +24,7 @@ BRIDGE_PID=$!
 # 3. Start the Rust Watcher (Sources signals -> Discord Bridge & JSONL)
 echo "📡 Starting Whale Watcher (Rust)..."
 # Uses ~/.config/wwatcher/config.json which points to localhost:3000
-nohup caffeinate -i ./target/release/wwatcher watch --threshold 10000 --interval 10 > watcher_rust.log 2>&1 &
+nohup caffeinate -i ./target/release/wwatcher watch --threshold 20000 --interval 5 > watcher_rust.log 2>&1 &
 WATCHER_PID=$!
 
 # 4. Start the Shadow Autopilot (Consumes signals -> AI Research -> Shadow Trades)

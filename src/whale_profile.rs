@@ -29,11 +29,12 @@ struct LeaderboardEntry {
     #[serde(rename = "proxyWallet", default)]
     proxy_wallet: Option<String>,
     #[serde(default)]
-    rank: Option<u32>,
-    #[serde(default)]
-    profit: Option<f64>,
-    #[serde(rename = "volume", default)]
-    _volume: Option<f64>,
+    rank: serde_json::Value, // Can be string or number
+    #[serde(rename = "pnl", default)]
+    pnl: Option<f64>,
+    #[serde(rename = "vol", default)]
+    #[allow(dead_code)]
+    vol: Option<f64>,
     #[serde(rename = "marketsTraded", default)]
     markets_traded: Option<u32>,
 }
@@ -41,17 +42,17 @@ struct LeaderboardEntry {
 #[derive(Debug, Deserialize)]
 struct PositionEntry {
     #[serde(rename = "currentValue", default)]
+    #[allow(dead_code)]
     current_value: Option<f64>,
     #[serde(default)]
+    #[allow(dead_code)]
     size: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
 struct ClosedPositionEntry {
-    #[serde(rename = "payout", default)]
-    payout: Option<f64>,
-    #[serde(rename = "cashPaid", default)]
-    cash_paid: Option<f64>,
+    #[serde(rename = "realizedPnl", default)]
+    realized_pnl: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -94,9 +95,14 @@ impl WhaleProfileCache {
         for entry in entries {
             if let Some(ref pw) = entry.proxy_wallet {
                 if pw.to_lowercase() == lower {
+                    let rank_val = match &entry.rank {
+                        serde_json::Value::Number(n) => n.as_u64().map(|v| v as u32).unwrap_or(0),
+                        serde_json::Value::String(s) => s.parse().unwrap_or(0),
+                        _ => 0,
+                    };
                     return Some((
-                        entry.rank.unwrap_or(0),
-                        entry.profit.unwrap_or(0.0),
+                        rank_val,
+                        entry.pnl.unwrap_or(0.0),
                         entry.markets_traded,
                     ));
                 }
@@ -133,7 +139,7 @@ async fn fetch_leaderboard() -> Option<Vec<LeaderboardEntry>> {
         .ok()?;
 
     let response = client
-        .get("https://data-api.polymarket.com/leaderboard")
+        .get("https://data-api.polymarket.com/v1/leaderboard")
         .query(&[("limit", "500")])
         .header("Accept", "application/json")
         .send()
@@ -169,15 +175,21 @@ async fn fetch_portfolio_value(wallet_id: &str) -> Option<f64> {
 
     let text = response.text().await.ok()?;
 
-    // The response might be a direct number or an object
+    // The response might be a direct number, an object, or an array of objects
     if let Ok(val) = text.trim().parse::<f64>() {
         return Some(val);
     }
     if let Ok(resp) = serde_json::from_str::<ValueResponse>(&text) {
         return resp.value;
     }
-    // Try parsing as generic JSON
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+        if let Some(arr) = v.as_array() {
+            if let Some(first) = arr.first() {
+                return first.get("value")
+                    .or_else(|| first.get("totalValue"))
+                    .and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok())));
+            }
+        }
         return v.get("value")
             .or_else(|| v.get("totalValue"))
             .and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok())));
@@ -237,9 +249,7 @@ async fn fetch_win_rate(wallet_id: &str) -> Option<(f64, u32)> {
 
     let total = positions.len() as u32;
     let wins = positions.iter().filter(|p| {
-        let payout = p.payout.unwrap_or(0.0);
-        let cost = p.cash_paid.unwrap_or(0.0);
-        payout > cost
+        p.realized_pnl.unwrap_or(0.0) > 0.0
     }).count() as u32;
 
     let rate = if total > 0 { wins as f64 / total as f64 } else { 0.0 };

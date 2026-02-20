@@ -5,6 +5,9 @@ use serde::Deserialize;
 use tokio::sync::mpsc;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
+use http::Request;
+
+use crate::ws::auth::generate_auth_headers;
 
 const KALSHI_WS_URL: &str = "wss://api.elections.kalshi.com/trade-api/ws/v2";
 const PING_INTERVAL: Duration = Duration::from_secs(10);
@@ -28,24 +31,27 @@ struct WsMessage {
     #[serde(rename = "type")]
     msg_type: Option<String>,
     #[serde(default)]
-    msg: Option<WsTradeMsg>,
+    msg: Option<WsTradePayload>,
 }
 
 #[derive(Debug, Deserialize)]
-struct WsTradeMsg {
-    #[serde(default)]
-    trades: Vec<WsTradeEntry>,
+#[serde(untagged)]
+enum WsTradePayload {
+    Batch { trades: Vec<WsTradeEntry> },
+    Single(WsTradeEntry),
 }
 
 #[derive(Debug, Deserialize)]
 struct WsTradeEntry {
     trade_id: Option<String>,
+    #[serde(rename = "market_ticker")]
     ticker: Option<String>,
     count: Option<i32>,
     yes_price: Option<f64>,
     no_price: Option<f64>,
     taker_side: Option<String>,
-    created_time: Option<String>,
+    #[serde(rename = "ts")]
+    timestamp: Option<i64>,
 }
 
 /// Subscribe command for Kalshi WebSocket
@@ -62,14 +68,14 @@ fn subscribe_cmd() -> String {
 
 /// Spawn a Kalshi WebSocket listener that sends trades to the returned channel.
 /// The connection auto-reconnects with exponential backoff on failure.
-pub fn spawn_kalshi_ws() -> mpsc::UnboundedReceiver<WsTrade> {
+pub fn spawn_kalshi_ws(api_key_id: Option<String>, private_key: Option<String>) -> mpsc::UnboundedReceiver<WsTrade> {
     let (tx, rx) = mpsc::unbounded_channel();
 
     tokio::spawn(async move {
         let mut backoff = RECONNECT_BASE;
 
         loop {
-            match connect_and_listen(&tx).await {
+            match connect_and_listen(&tx, api_key_id.as_deref(), private_key.as_deref()).await {
                 Ok(()) => {
                     // Clean disconnect — reconnect immediately
                     eprintln!("[WS] Kalshi WebSocket disconnected, reconnecting...");
@@ -89,27 +95,36 @@ pub fn spawn_kalshi_ws() -> mpsc::UnboundedReceiver<WsTrade> {
 
 async fn connect_and_listen(
     tx: &mpsc::UnboundedSender<WsTrade>,
+    api_key_id: Option<&str>,
+    private_key: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let (ws_stream, _) = connect_async(KALSHI_WS_URL).await?;
+    
+    // Build the request with auth headers if credentials provided
+    let mut builder = Request::builder()
+        .method("GET")
+        .uri(KALSHI_WS_URL)
+        .header("Host", "api.elections.kalshi.com")
+        .header("Connection", "Upgrade")
+        .header("Upgrade", "websocket")
+        .header("Sec-WebSocket-Version", "13")
+        .header("Sec-WebSocket-Key", tokio_tungstenite::tungstenite::handshake::client::generate_key());
+    
+    if let (Some(key_id), Some(priv_key)) = (api_key_id, private_key) {
+        let headers = generate_auth_headers(key_id, priv_key)?;
+        for (name, value) in headers {
+            builder = builder.header(name, value);
+        }
+    }
+
+    let request = builder.body(())?;
+
+    let (ws_stream, _) = connect_async(request).await?;
     let (mut write, mut read) = ws_stream.split();
 
     // Subscribe to trade channel
     write.send(Message::Text(subscribe_cmd())).await?;
 
-    // Ping loop
-    let ping_tx = tx.clone();
-    let ping_handle = tokio::spawn(async move {
-        let mut interval = tokio::time::interval(PING_INTERVAL);
-        loop {
-            interval.tick().await;
-            if ping_tx.is_closed() {
-                break;
-            }
-        }
-    });
-
-    // Also spawn a ping sender on the write half
-    // We need to use a channel to coordinate writes
+    // Writer channel
     let (write_tx, mut write_rx) = mpsc::unbounded_channel::<Message>();
 
     // Spawn writer task
@@ -137,28 +152,29 @@ async fn connect_and_listen(
     while let Some(msg) = read.next().await {
         match msg {
             Ok(Message::Text(text)) => {
-                // Try to parse as trade message
-                if let Ok(ws_msg) = serde_json::from_str::<WsMessage>(&text) {
-                    if ws_msg.msg_type.as_deref() == Some("trade") {
-                        if let Some(trade_msg) = ws_msg.msg {
-                            for entry in trade_msg.trades {
-                                if let Some(trade) = parse_ws_trade(entry) {
-                                    if tx.send(trade).is_err() {
-                                        // Receiver dropped
-                                        ping_handle.abort();
-                                        ping_task.abort();
-                                        writer_handle.abort();
-                                        return Ok(());
+                match serde_json::from_str::<WsMessage>(&text) {
+                    Ok(ws_msg) => {
+                        if ws_msg.msg_type.as_deref() == Some("trade") {
+                            if let Some(payload) = ws_msg.msg {
+                                let entries = match payload {
+                                    WsTradePayload::Batch { trades } => trades,
+                                    WsTradePayload::Single(entry) => vec![entry],
+                                };
+                                
+                                for entry in entries {
+                                    if let Some(trade) = parse_ws_trade(entry) {
+                                        if tx.send(trade).is_err() {
+                                            ping_task.abort();
+                                            writer_handle.abort();
+                                            return Ok(());
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
-                }
-                // Also try flat trade format (some WS messages are different shape)
-                else if let Ok(entry) = serde_json::from_str::<WsTradeEntry>(&text) {
-                    if let Some(trade) = parse_ws_trade(entry) {
-                        let _ = tx.send(trade);
+                    },
+                    Err(_) => {
+                        // Silent skip malformed messages (e.g. system status)
                     }
                 }
             }
@@ -169,7 +185,6 @@ async fn connect_and_listen(
                 break;
             }
             Err(e) => {
-                ping_handle.abort();
                 ping_task.abort();
                 writer_handle.abort();
                 return Err(Box::new(e));
@@ -178,7 +193,6 @@ async fn connect_and_listen(
         }
     }
 
-    ping_handle.abort();
     ping_task.abort();
     writer_handle.abort();
     Ok(())
@@ -192,6 +206,10 @@ fn parse_ws_trade(entry: WsTradeEntry) -> Option<WsTrade> {
         yes_price: entry.yes_price.unwrap_or(0.0),
         no_price: entry.no_price.unwrap_or(0.0),
         taker_side: entry.taker_side.unwrap_or_else(|| "yes".to_string()),
-        created_time: entry.created_time.unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
+        created_time: entry.timestamp
+            .map(|t| chrono::DateTime::from_timestamp(t, 0)
+                .map(|dt| dt.to_rfc3339())
+                .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()))
+            .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
     })
 }

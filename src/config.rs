@@ -8,6 +8,8 @@ pub struct Config {
     pub kalshi_private_key: Option<String>,
     pub webhook_url: Option<String>,
     #[serde(default)]
+    pub kalshi_is_demo: bool,
+    #[serde(default)]
     pub rapidapi_key: Option<String>,
     #[serde(default)]
     pub perplexity_api_key: Option<String>,
@@ -20,6 +22,10 @@ pub struct Config {
     /// Default whale alert threshold in USD
     #[serde(default = "default_threshold")]
     pub threshold: u64,
+    /// Bet size in USD for automated execution
+    #[serde(default = "default_bet_size")]
+    pub bet_size: f64,
+    pub discord_webhook_url: Option<String>,
     /// Which platforms to monitor: ["polymarket", "kalshi"] or ["all"]
     #[serde(default = "default_platforms")]
     pub platforms: Vec<String>,
@@ -58,6 +64,10 @@ fn default_max_odds() -> f64 {
 
 fn default_min_spread() -> f64 {
     0.0
+}
+
+fn default_bet_size() -> f64 {
+    5.0
 }
 
 fn config_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
