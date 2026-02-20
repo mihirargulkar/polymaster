@@ -48,7 +48,13 @@ impl WalletTracker {
         self.cleanup_old_transactions();
     }
 
-    /// Record a transaction into the SQLite wallet_memory table
+    /// Mark a wallet as seen in the hot cache (call after db::record_wallet_memory)
+    pub fn record_wallet_seen(&mut self, wallet_id: &str) {
+        self.known_hashes.insert(db::wallet_hash(wallet_id));
+    }
+
+    /// Record a transaction into the SQLite wallet_memory table (sync; watch uses db::record_wallet_memory + spawn_blocking)
+    #[allow(dead_code)]
     pub fn record_to_db(
         &mut self,
         conn: &Connection,
@@ -61,25 +67,8 @@ impl WalletTracker {
         price: f64,
         platform: &str,
     ) {
-        let hash = db::wallet_hash(wallet_id);
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-
-        let result = conn.execute(
-            "INSERT OR REPLACE INTO wallet_memory
-             (wallet_hash, wallet_id, market_title, market_id, outcome, action, value, price, platform, seen_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-            params![hash, wallet_id, market_title, market_id, outcome, action, value, price, platform, now],
-        );
-
-        if let Err(e) = result {
-            eprintln!("Warning: Failed to record wallet memory: {}", e);
-        }
-
-        // Add to hot cache
-        self.known_hashes.insert(hash);
+        db::record_wallet_memory(conn, wallet_id, market_title, market_id, outcome, action, value, price, platform);
+        self.record_wallet_seen(wallet_id);
     }
 
     /// Query wallet history from SQLite (last 12h)

@@ -6,7 +6,8 @@ use rusqlite::Connection;
 use super::AlertData;
 use crate::db;
 
-/// Log an alert to the SQLite database and JSONL file
+/// Log an alert to the SQLite database and JSONL file (sync; watch uses log_alert_blocking)
+#[allow(dead_code)]
 pub fn log_alert(alert: &AlertData, conn: &Connection) -> Option<i64> {
     let alert_json = super::build_alert_payload(alert, false);
 
@@ -43,6 +44,77 @@ pub fn log_alert(alert: &AlertData, conn: &Connection) -> Option<i64> {
         alert.timestamp,
         market_context_json.as_deref(),
         wallet_activity_json.as_deref(),
+    )
+}
+
+/// Build LogAlertParams from AlertData for use with log_alert_blocking
+pub fn build_log_params(alert: &AlertData) -> LogAlertParams {
+    let alert_json = super::build_alert_payload(alert, false);
+    let jsonl_line = serde_json::to_string(&alert_json).unwrap_or_default();
+    LogAlertParams {
+        platform: alert.platform.to_string(),
+        alert_type: alert.alert_type().to_string(),
+        action: alert.side.to_uppercase(),
+        value: alert.value,
+        price: alert.price,
+        size: alert.size,
+        market_title: alert.market_title.map(|s| s.to_string()),
+        market_id: alert.market_id.map(|s| s.to_string()),
+        outcome: alert.outcome.map(|s| s.to_string()),
+        wallet_id: alert.wallet_id.map(|s| s.to_string()),
+        timestamp: alert.timestamp.to_string(),
+        market_context_json: alert_json.get("market_context").map(|v| v.to_string()),
+        wallet_activity_json: alert_json.get("wallet_activity").map(|v| v.to_string()),
+        jsonl_line,
+    }
+}
+
+/// Owned params for log_alert_blocking (used with spawn_blocking)
+pub struct LogAlertParams {
+    pub platform: String,
+    pub alert_type: String,
+    pub action: String,
+    pub value: f64,
+    pub price: f64,
+    pub size: f64,
+    pub market_title: Option<String>,
+    pub market_id: Option<String>,
+    pub outcome: Option<String>,
+    pub wallet_id: Option<String>,
+    pub timestamp: String,
+    pub market_context_json: Option<String>,
+    pub wallet_activity_json: Option<String>,
+    pub jsonl_line: String,
+}
+
+/// Log an alert using owned params (for spawn_blocking). Returns alert row id.
+pub fn log_alert_blocking(params: LogAlertParams, conn: &Connection) -> Option<i64> {
+    if let Some(config_dir) = dirs::config_dir() {
+        let jsonl_path = config_dir.join("wwatcher").join("alert_history.jsonl");
+        if let Ok(mut file) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&jsonl_path)
+        {
+            let _ = writeln!(file, "{}", params.jsonl_line);
+        }
+    }
+
+    db::insert_alert(
+        conn,
+        &params.platform,
+        &params.alert_type,
+        &params.action,
+        params.value,
+        params.price,
+        params.size,
+        params.market_title.as_deref(),
+        params.market_id.as_deref(),
+        params.outcome.as_deref(),
+        params.wallet_id.as_deref(),
+        &params.timestamp,
+        params.market_context_json.as_deref(),
+        params.wallet_activity_json.as_deref(),
     )
 }
 

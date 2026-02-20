@@ -1040,8 +1040,11 @@ mod tests {
     }
 
     // ── E2E: Full match_market (embedding + LLM rerank) ────────────────
+    // These tests require Ollama with llama3 + nomic-embed-text. LLM output is
+    // non-deterministic — run with `cargo test -- --ignored` to execute them.
 
     #[tokio::test]
+    #[ignore = "requires Ollama; LLM output non-deterministic"]
     async fn e2e_match_market_lille() {
         if !ollama_available() {
             eprintln!("SKIP: Ollama not running");
@@ -1073,6 +1076,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires Ollama; LLM output non-deterministic"]
     async fn e2e_match_market_btc() {
         if !ollama_available() {
             eprintln!("SKIP: Ollama not running");
@@ -1097,6 +1101,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires Ollama; LLM output non-deterministic"]
     async fn e2e_match_market_ceasefire() {
         if !ollama_available() {
             eprintln!("SKIP: Ollama not running");
@@ -1127,6 +1132,7 @@ mod tests {
     // ── E2E: Cache hit on second call ──────────────────────────────────
 
     #[tokio::test]
+    #[ignore = "requires Ollama; LLM output non-deterministic"]
     async fn e2e_cache_hit_second_call() {
         if !ollama_available() {
             eprintln!("SKIP: Ollama not running");
@@ -1170,6 +1176,7 @@ mod tests {
     // ── E2E: No match for unrelated query ───────────────────────────────
 
     #[tokio::test]
+    #[ignore = "requires Ollama; LLM output non-deterministic"]
     async fn e2e_no_match_unrelated() {
         if !ollama_available() {
             eprintln!("SKIP: Ollama not running");

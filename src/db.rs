@@ -301,8 +301,11 @@ pub fn query_alerts(
     Ok(alerts)
 }
 
-/// Prune old alerts based on retention days
+/// Prune old alerts based on retention days. 0 = keep forever.
 pub fn prune_old_alerts(conn: &Connection, retention_days: u32) {
+    if retention_days == 0 {
+        return;
+    }
     let seconds = retention_days as i64 * 86400;
     let result = conn.execute(
         "DELETE FROM alerts WHERE created_at < (strftime('%s', 'now') - ?1)",
@@ -310,6 +313,36 @@ pub fn prune_old_alerts(conn: &Connection, retention_days: u32) {
     );
     if let Err(e) = result {
         eprintln!("Warning: Failed to prune old alerts: {}", e);
+    }
+}
+
+/// Insert into wallet_memory (for spawn_blocking; WalletTracker.record_to_db uses this)
+pub fn record_wallet_memory(
+    conn: &Connection,
+    wallet_id: &str,
+    market_title: Option<&str>,
+    market_id: Option<&str>,
+    outcome: Option<&str>,
+    action: &str,
+    value: f64,
+    price: f64,
+    platform: &str,
+) {
+    let hash = wallet_hash(wallet_id);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+
+    let result = conn.execute(
+        "INSERT OR REPLACE INTO wallet_memory
+         (wallet_hash, wallet_id, market_title, market_id, outcome, action, value, price, platform, seen_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![hash, wallet_id, market_title, market_id, outcome, action, value, price, platform, now],
+    );
+
+    if let Err(e) = result {
+        eprintln!("Warning: Failed to record wallet memory: {}", e);
     }
 }
 

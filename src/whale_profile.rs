@@ -1,7 +1,19 @@
 use std::collections::HashMap;
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
+
+fn shared_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .pool_max_idle_per_host(4)
+            .build()
+            .expect("failed to build shared HTTP client")
+    })
+}
 
 const PROFILE_TTL: Duration = Duration::from_secs(30 * 60); // 30 min cache
 const LEADERBOARD_TTL: Duration = Duration::from_secs(60 * 60); // 1 hour cache
@@ -133,12 +145,7 @@ impl WhaleProfileCache {
 
 /// Fetch trader leaderboard (top 500)
 async fn fetch_leaderboard() -> Option<Vec<LeaderboardEntry>> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .ok()?;
-
-    let response = client
+    let response = shared_client()
         .get("https://data-api.polymarket.com/v1/leaderboard")
         .query(&[("limit", "500")])
         .header("Accept", "application/json")
@@ -156,12 +163,7 @@ async fn fetch_leaderboard() -> Option<Vec<LeaderboardEntry>> {
 
 /// Fetch portfolio total value for a wallet
 async fn fetch_portfolio_value(wallet_id: &str) -> Option<f64> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()
-        .ok()?;
-
-    let response = client
+    let response = shared_client()
         .get("https://data-api.polymarket.com/value")
         .query(&[("user", wallet_id)])
         .header("Accept", "application/json")
@@ -199,12 +201,7 @@ async fn fetch_portfolio_value(wallet_id: &str) -> Option<f64> {
 
 /// Fetch current open positions count
 async fn fetch_positions_count(wallet_id: &str) -> Option<u32> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()
-        .ok()?;
-
-    let response = client
+    let response = shared_client()
         .get("https://data-api.polymarket.com/positions")
         .query(&[("user", wallet_id), ("limit", "100")])
         .header("Accept", "application/json")
@@ -223,17 +220,12 @@ async fn fetch_positions_count(wallet_id: &str) -> Option<u32> {
 
 /// Compute win rate from ALL closed positions (paginated — API returns 50 per page sorted by PnL desc).
 async fn fetch_win_rate(wallet_id: &str) -> Option<(f64, u32)> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .ok()?;
-
     let mut all_positions: Vec<ClosedPositionEntry> = Vec::new();
     let page_size = 50;
 
     for page in 0..20 {
         let offset = page * page_size;
-        let resp = client
+        let resp = shared_client()
             .get("https://data-api.polymarket.com/closed-positions")
             .query(&[
                 ("user", wallet_id),

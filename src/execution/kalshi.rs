@@ -42,6 +42,10 @@ struct OrderResponse {
 struct OrderObj {
     order_id: String,
     status: String,
+    #[serde(default)]
+    fill_count: i32,
+    #[serde(default)]
+    remaining_count: i32,
 }
 
 impl KalshiExecutor {
@@ -214,6 +218,30 @@ impl KalshiExecutor {
             let err_text = resp.text().await?;
             eprintln!("❌ ORDER FAILED: {}", err_text);
             Err(format!("API Error: {}", err_text).into())
+        }
+    }
+
+    /// Fetch order status. Returns (status, fill_count). Used to verify fills before counting against daily loss.
+    pub async fn get_order_status(&self, order_id: &str) -> Result<(String, i32), Box<dyn std::error::Error>> {
+        let path = format!("/trade-api/v2/portfolio/orders/{}", order_id);
+        let url = format!("{}/portfolio/orders/{}", self.base_url, order_id);
+        let headers = self.auth_headers("GET", &path)?;
+
+        let resp = self.client
+            .get(&url)
+            .headers(headers)
+            .send()
+            .await?;
+
+        if resp.status().is_success() {
+            let data: serde_json::Value = resp.json().await?;
+            let order = data.get("order").ok_or("Missing order in response")?;
+            let status = order.get("status").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+            let fill_count = order.get("fill_count").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            Ok((status, fill_count))
+        } else {
+            let err_text = resp.text().await?;
+            Err(format!("Order status check failed: {}", err_text).into())
         }
     }
 }

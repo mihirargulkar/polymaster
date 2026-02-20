@@ -9,6 +9,8 @@ mod whale_profile;
 mod ws;
 mod execution;
 
+use std::sync::{Arc, Mutex};
+
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -81,6 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             threshold,
             interval,
         } => {
+            let conn = Arc::new(Mutex::new(conn));
             commands::watch::watch_whales(threshold, interval, conn).await?;
         }
         Commands::History {

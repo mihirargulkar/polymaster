@@ -1,6 +1,19 @@
+use std::sync::OnceLock;
+
 use crate::config::Config;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+fn shared_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .pool_max_idle_per_host(4)
+            .build()
+            .expect("failed to build shared HTTP client")
+    })
+}
 
 #[derive(Error, Debug)]
 pub enum KalshiError {
@@ -33,12 +46,9 @@ struct TradesResponse {
 }
 
 pub async fn fetch_recent_trades(config: Option<&Config>) -> Result<Vec<Trade>, KalshiError> {
-    let client = reqwest::Client::new();
-
-    // Kalshi's public trades endpoint
     let url = "https://api.elections.kalshi.com/trade-api/v2/markets/trades";
 
-    let mut request = client
+    let mut request = shared_client()
         .get(url)
         .query(&[("limit", "100")])
         .header("Accept", "application/json");
@@ -214,7 +224,6 @@ fn collect_markets_from_events(
 /// On-demand search: query Kalshi for markets relevant to a Polymarket title.
 /// Uses targeted series queries for sports and a general events fetch otherwise.
 pub async fn search_markets(poly_title: &str) -> Result<Vec<MarketInfo>, KalshiError> {
-    let client = reqwest::Client::new();
     let events_url = "https://api.elections.kalshi.com/trade-api/v2/events";
 
     let series = detect_series_tickers(poly_title);
@@ -222,7 +231,7 @@ pub async fn search_markets(poly_title: &str) -> Result<Vec<MarketInfo>, KalshiE
     let mut seen_tickers = std::collections::HashSet::new();
 
     for s in &series {
-        let resp = client
+        let resp = shared_client()
             .get(events_url)
             .query(&[
                 ("series_ticker", *s),
@@ -245,7 +254,7 @@ pub async fn search_markets(poly_title: &str) -> Result<Vec<MarketInfo>, KalshiE
     }
 
     if series.is_empty() || all_markets.is_empty() {
-        let resp = client
+        let resp = shared_client()
             .get(events_url)
             .query(&[
                 ("status", "open"),
@@ -275,13 +284,12 @@ pub async fn search_markets(poly_title: &str) -> Result<Vec<MarketInfo>, KalshiE
 }
 
 pub async fn fetch_market_context(ticker: &str) -> Option<crate::alerts::MarketContext> {
-    let client = reqwest::Client::new();
     let url = format!(
         "https://api.elections.kalshi.com/trade-api/v2/markets/{}",
         ticker
     );
 
-    let response = client.get(&url).send().await.ok()?;
+    let response = shared_client().get(&url).send().await.ok()?;
     if !response.status().is_success() {
         return None;
     }
@@ -351,17 +359,12 @@ pub async fn fetch_market_context(ticker: &str) -> Option<crate::alerts::MarketC
 
 /// Fetch order book from Kalshi public API
 pub async fn fetch_order_book(ticker: &str) -> Option<crate::alerts::OrderBookSummary> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-        .ok()?;
-
     let url = format!(
         "https://api.elections.kalshi.com/trade-api/v2/markets/{}/orderbook",
         ticker
     );
 
-    let response = client
+    let response = shared_client()
         .get(&url)
         .header("Accept", "application/json")
         .send()
@@ -431,13 +434,12 @@ pub async fn fetch_order_book(ticker: &str) -> Option<crate::alerts::OrderBookSu
 
 /// Fetch full market info including native category and tags
 pub async fn fetch_market_info_full(ticker: &str) -> Option<MarketInfo> {
-    let client = reqwest::Client::new();
     let url = format!(
         "https://api.elections.kalshi.com/trade-api/v2/markets/{}",
         ticker
     );
 
-    match client.get(&url).send().await {
+    match shared_client().get(&url).send().await {
         Ok(response) if response.status().is_success() => {
             if let Ok(text) = response.text().await {
                 if let Ok(market_response) = serde_json::from_str::<MarketResponse>(&text) {

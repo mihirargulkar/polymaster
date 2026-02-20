@@ -1,4 +1,4 @@
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use colored::*;
@@ -68,7 +68,14 @@ fn quarter_kelly_fraction(win_rate: f64, price_cents: i64, fee_cents: i64, max_f
     (full_kelly / 4.0).min(max_frac).max(0.0)
 }
 
-async fn closes_within_24h(ticker: &str) -> bool {
+/// Fetched Kalshi market snapshot used for order pricing and expiry checks.
+struct KalshiMarketSnapshot {
+    closes_within_24h: bool,
+    yes_price_cents: i64,
+    no_price_cents: i64,
+}
+
+async fn fetch_kalshi_market_snapshot(ticker: &str) -> Option<KalshiMarketSnapshot> {
     let url = format!(
         "https://api.elections.kalshi.com/trade-api/v2/markets/{}",
         ticker
@@ -80,44 +87,43 @@ async fn closes_within_24h(ticker: &str) -> bool {
         .await
     {
         Ok(r) if r.status().is_success() => r,
-        _ => return false,
+        _ => return None,
     };
 
-    let text = match resp.text().await {
-        Ok(t) => t,
-        Err(_) => return false,
-    };
-    let parsed: serde_json::Value = match serde_json::from_str(&text) {
-        Ok(v) => v,
-        Err(_) => return false,
-    };
-    let market = match parsed.get("market") {
-        Some(m) => m,
-        None => return false,
-    };
+    let text = resp.text().await.ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let market = parsed.get("market")?;
+
+    let yes_price_cents = market.get("yes_ask")
+        .or_else(|| market.get("last_price"))
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    let no_price_cents = market.get("no_ask")
+        .and_then(|v| v.as_i64())
+        .unwrap_or_else(|| 100 - yes_price_cents);
 
     let expiry_str = market
         .get("expected_expiration_time")
         .or_else(|| market.get("close_time"))
         .and_then(|v| v.as_str());
 
-    let expiry_str = match expiry_str {
-        Some(s) => s,
-        None => return false,
-    };
-
-    match chrono::DateTime::parse_from_rfc3339(expiry_str) {
-        Ok(expiry) => {
-            let expiry_utc = expiry.with_timezone(&chrono::Utc);
-            let hours_left = (expiry_utc - chrono::Utc::now()).num_hours();
+    let closes_within_24h = expiry_str
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|expiry| {
+            let hours_left = (expiry.with_timezone(&chrono::Utc) - chrono::Utc::now()).num_hours();
             println!("⏰ Market {} closes in ~{}h", ticker, hours_left);
             hours_left <= 24 && hours_left >= 0
-        }
-        Err(_) => false,
-    }
+        })
+        .unwrap_or(false);
+
+    Some(KalshiMarketSnapshot {
+        closes_within_24h,
+        yes_price_cents,
+        no_price_cents,
+    })
 }
 
-pub async fn watch_whales(threshold: u64, interval: u64, conn: Connection) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn watch_whales(threshold: u64, interval: u64, conn: Arc<Mutex<Connection>>) -> Result<(), Box<dyn std::error::Error>> {
     // Display disclaimer
     println!("{}", "=".repeat(70).bright_yellow());
     println!("{}", "DISCLAIMER".bright_yellow().bold());
@@ -128,7 +134,7 @@ pub async fn watch_whales(threshold: u64, interval: u64, conn: Connection) -> Re
     println!("{}", "=".repeat(70).bright_yellow());
     println!();
 
-    let config = crate::config::load_config().ok();
+    let mut config = crate::config::load_config().ok();
     let mut prune_counter = 0;
 
     println!("\n{} ...", "WHALE WATCHER ACTIVE".bright_green().bold());
@@ -138,9 +144,9 @@ pub async fn watch_whales(threshold: u64, interval: u64, conn: Connection) -> Re
     );
     println!("Interval:  {} seconds", interval);
 
-    // Initialize category filtering
+    // Initialize category filtering (reloaded each prune cycle)
     let category_registry = CategoryRegistry::new();
-    let selected_categories: Vec<String> = config
+    let mut selected_categories: Vec<String> = config
         .as_ref()
         .map(|c| c.categories.clone())
         .unwrap_or_else(|| vec!["all".into()]);
@@ -154,13 +160,13 @@ pub async fn watch_whales(threshold: u64, interval: u64, conn: Connection) -> Re
         );
     }
 
-    // Platform filtering
-    let selected_platforms: Vec<String> = config
+    // Platform filtering (reloaded each prune cycle)
+    let mut selected_platforms: Vec<String> = config
         .as_ref()
         .map(|c| c.platforms.clone())
         .unwrap_or_else(|| vec!["all".into()]);
-    let watch_polymarket = selected_platforms.iter().any(|p| p == "all" || p == "polymarket");
-    let watch_kalshi = selected_platforms.iter().any(|p| p == "all" || p == "kalshi");
+    let mut watch_polymarket = selected_platforms.iter().any(|p| p == "all" || p == "polymarket");
+    let mut watch_kalshi = selected_platforms.iter().any(|p| p == "all" || p == "kalshi");
 
     if watch_polymarket && watch_kalshi {
         println!("Platforms:  {}", "Polymarket + Kalshi".bright_green());
@@ -177,7 +183,12 @@ pub async fn watch_whales(threshold: u64, interval: u64, conn: Connection) -> Re
     }
 
     // Show DB info
-    let alert_count = db::alert_count(&conn);
+    let alert_count = {
+        let conn = conn.clone();
+        tokio::task::spawn_blocking(move || db::alert_count(&*conn.lock().unwrap()))
+            .await
+            .unwrap_or(0)
+    };
     println!("Database:  {} alerts stored", alert_count.to_string().bright_white());
     println!();
 
@@ -189,15 +200,16 @@ pub async fn watch_whales(threshold: u64, interval: u64, conn: Connection) -> Re
     let mut wallet_tracker = types::WalletTracker::new();
     let mut whale_cache = whale_profile::WhaleProfileCache::new();
 
-    // ── Risk management state ───────────────────────────────────────────
-    let max_open = config.as_ref().map(|c| c.max_open_positions).unwrap_or(5);
-    let daily_loss_frac = config.as_ref().map(|c| c.daily_loss_limit).unwrap_or(0.10);
-    let reserve_frac = config.as_ref().map(|c| c.reserve_fraction).unwrap_or(0.20);
-    let max_bet_frac = config.as_ref().map(|c| c.max_bet_fraction).unwrap_or(0.02);
-    let max_bet_cap = config.as_ref().map(|c| c.max_bet_cap).unwrap_or(10.0);
-    let max_entry_cents: i64 = config.as_ref().map(|c| c.max_entry_price_cents).unwrap_or(97);
+    // ── Risk management state (reloaded each prune cycle) ─────────────────
+    let mut max_open = config.as_ref().map(|c| c.max_open_positions).unwrap_or(5);
+    let mut daily_loss_frac = config.as_ref().map(|c| c.daily_loss_limit).unwrap_or(0.10);
+    let mut reserve_frac = config.as_ref().map(|c| c.reserve_fraction).unwrap_or(0.20);
+    let mut max_bet_frac = config.as_ref().map(|c| c.max_bet_fraction).unwrap_or(0.02);
+    let mut max_bet_cap = config.as_ref().map(|c| c.max_bet_cap).unwrap_or(10.0);
+    let mut max_entry_cents: i64 = config.as_ref().map(|c| c.max_entry_price_cents).unwrap_or(97);
     let mut day_start_balance_cents: Option<i64> = None;
     let mut daily_loss_cents: i64 = 0;
+    let mut current_trading_day = chrono::Utc::now().date_naive();
 
     // Initialize Execution Modules (Ollama for Polymarket→Kalshi matching)
     let (ollama_model, ollama_embed_model, ollama_url) = config
@@ -205,7 +217,7 @@ pub async fn watch_whales(threshold: u64, interval: u64, conn: Connection) -> Re
         .map(|c| (c.ollama_model.clone(), c.ollama_embed_model.clone(), c.ollama_url.clone()))
         .unwrap_or_else(|| ("llama3".into(), "nomic-embed-text".into(), "http://localhost:11434".into()));
     let mut matcher = MarketMatcher::new(ollama_model, ollama_embed_model, Some(&ollama_url));
-    let mut executed_tickers: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut executed_tickers: std::collections::HashMap<String, std::time::Instant> = std::collections::HashMap::new();
     let kalshi_executor = if let Some(ref cfg) = config {
         if let (Some(key_id), Some(private_key_input)) = (&cfg.kalshi_api_key_id, &cfg.kalshi_private_key) {
              let private_key_pem = resolve_pem(private_key_input);
@@ -229,10 +241,11 @@ pub async fn watch_whales(threshold: u64, interval: u64, conn: Connection) -> Re
             Ok(open_events) => {
                 if !open_events.is_empty() {
                     println!("📋 Loaded {} existing Kalshi positions into dedup set:", open_events.len());
+                    let now = std::time::Instant::now();
                     for et in &open_events {
                         println!("   • {}", et);
+                        executed_tickers.insert(et.clone(), now);
                     }
-                    executed_tickers.extend(open_events);
                 } else {
                     println!("📋 No existing Kalshi positions — dedup set empty");
                 }
@@ -255,27 +268,84 @@ pub async fn watch_whales(threshold: u64, interval: u64, conn: Connection) -> Re
     let kalshi_ws_fallback_threshold = Duration::from_secs(interval * 12); // fall back to HTTP if no WS trades in ~1 min
 
     let mut tick_interval = time::interval(Duration::from_secs(interval));
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    tokio::spawn(async move {
+        #[cfg(unix)]
+        async fn wait_sigterm() {
+            if let Ok(mut sig) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+                let _ = sig.recv().await;
+            }
+        }
+        #[cfg(not(unix))]
+        async fn wait_sigterm() {
+            std::future::pending::<()>().await
+        }
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = wait_sigterm() => {}
+        }
+        let _ = shutdown_tx.send(());
+    });
 
     let mut kalshi_market_cache: std::collections::HashMap<String, Option<kalshi::MarketInfo>> = std::collections::HashMap::new();
     let mut kalshi_context_cache: std::collections::HashMap<String, Option<crate::alerts::MarketContext>> = std::collections::HashMap::new();
 
     loop {
-        tick_interval.tick().await;
+        tokio::select! {
+            _ = tick_interval.tick() => {}
+            _ = &mut shutdown_rx => {
+                println!("\n{} Shutting down gracefully...", "⏹".bright_yellow());
+                break Ok(());
+            }
+        }
+
+        // Reset daily risk counters at midnight UTC
+        let today = chrono::Utc::now().date_naive();
+        if today != current_trading_day {
+            println!("📅 New trading day ({}) — resetting daily loss counter", today);
+            current_trading_day = today;
+            daily_loss_cents = 0;
+            day_start_balance_cents = None; // re-capture on next trade
+        }
 
         // Periodic cleanup and cache refresh
         prune_counter += 1;
         if prune_counter >= 60 {
             prune_counter = 0;
 
+            // Reload config (risk params, categories, platforms)
+            config = crate::config::load_config().ok();
+            max_open = config.as_ref().map(|c| c.max_open_positions).unwrap_or(5);
+            daily_loss_frac = config.as_ref().map(|c| c.daily_loss_limit).unwrap_or(0.10);
+            reserve_frac = config.as_ref().map(|c| c.reserve_fraction).unwrap_or(0.20);
+            max_bet_frac = config.as_ref().map(|c| c.max_bet_fraction).unwrap_or(0.02);
+            max_bet_cap = config.as_ref().map(|c| c.max_bet_cap).unwrap_or(10.0);
+            max_entry_cents = config.as_ref().map(|c| c.max_entry_price_cents).unwrap_or(97);
+            selected_categories = config.as_ref().map(|c| c.categories.clone()).unwrap_or_else(|| vec!["all".into()]);
+            selected_platforms = config.as_ref().map(|c| c.platforms.clone()).unwrap_or_else(|| vec!["all".into()]);
+            watch_polymarket = selected_platforms.iter().any(|p| p == "all" || p == "polymarket");
+            watch_kalshi = selected_platforms.iter().any(|p| p == "all" || p == "kalshi");
+
             matcher.prune_cache();
-            db::prune_wallet_memory(&conn);
             let retention = config.as_ref().map(|c| c.history_retention_days).unwrap_or(30);
-            db::prune_old_alerts(&conn, retention);
+            {
+                let conn = conn.clone();
+                let retention = retention;
+                tokio::task::spawn_blocking(move || {
+                    let guard = conn.lock().unwrap();
+                    db::prune_wallet_memory(&*guard);
+                    db::prune_old_alerts(&*guard, retention);
+                })
+                .await
+                .ok();
+            }
             whale_cache.prune();
             kalshi_market_cache.clear();
             kalshi_context_cache.clear();
+            // Prune executed tickers older than 25h (markets close within 24h)
+            executed_tickers.retain(|_, inserted_at| inserted_at.elapsed() < Duration::from_secs(25 * 3600));
         }
-        wallet_tracker.maybe_refresh_cache(&conn);
+        wallet_tracker.maybe_refresh_cache(&*conn.lock().unwrap());
 
         // Drain Kalshi WebSocket trades (non-blocking)
         if let Some(ref mut rx) = kalshi_ws_rx {
@@ -398,7 +468,13 @@ pub async fn watch_whales(threshold: u64, interval: u64, conn: Connection) -> Re
                     top_holders: None,
                 };
 
-                history::log_alert(&alert_data, &conn);
+                let params = history::build_log_params(&alert_data);
+                let conn_clone = conn.clone();
+                tokio::task::spawn_blocking(move || {
+                    history::log_alert_blocking(params, &*conn_clone.lock().unwrap())
+                })
+                .await
+                .ok();
             }
         }
 
@@ -448,7 +524,7 @@ pub async fn watch_whales(threshold: u64, interval: u64, conn: Connection) -> Re
                             // Check for returning whale (12h memory)
                             let whale_scenario = trade.wallet_id.as_deref().and_then(|wid| {
                                 wallet_tracker.classify_whale_return(
-                                    &conn,
+                                    &*conn.lock().unwrap(),
                                     wid,
                                     Some(&trade.asset_id),
                                     trade.outcome.as_deref(),
@@ -528,7 +604,16 @@ pub async fn watch_whales(threshold: u64, interval: u64, conn: Connection) -> Re
                                 top_holders: top_holders.as_ref(),
                             };
 
-                            let alert_id = history::log_alert(&alert_data, &conn);
+                            let alert_id = {
+                                let params = history::build_log_params(&alert_data);
+                                let conn_clone = conn.clone();
+                                tokio::task::spawn_blocking(move || {
+                                    history::log_alert_blocking(params, &*conn_clone.lock().unwrap())
+                                })
+                                .await
+                                .ok()
+                                .flatten()
+                            };
 
                             // ═══ RISK-MANAGED EXECUTION PIPELINE ═══════════════
                             let whale_win_rate = wp.as_ref().and_then(|p| p.win_rate);
@@ -570,7 +655,7 @@ pub async fn watch_whales(threshold: u64, interval: u64, conn: Connection) -> Re
                                     };
 
                                     // Gate 2: Event-level dedup
-                                    if executed_tickers.contains(&dedup_key) {
+                                    if executed_tickers.contains_key(&dedup_key) {
                                         println!("⚠️ Already have position on event {} — skipping",
                                             dedup_key);
                                     }
@@ -579,8 +664,9 @@ pub async fn watch_whales(threshold: u64, interval: u64, conn: Connection) -> Re
                                         println!("⚠️ Max {} open positions reached — skipping {}",
                                             max_open, match_result.ticker);
                                     }
-                                    // Gate 4: 24h expiry
-                                    else if !closes_within_24h(&match_result.ticker).await {
+                                    // Gate 4: 24h expiry + fetch Kalshi live price
+                                    else if let Some(snapshot) = fetch_kalshi_market_snapshot(&match_result.ticker).await {
+                                    if !snapshot.closes_within_24h {
                                         println!("⚠️ Skipping {}: does not close within 24 hours",
                                             match_result.ticker);
                                     }
@@ -589,12 +675,16 @@ pub async fn watch_whales(threshold: u64, interval: u64, conn: Connection) -> Re
                                         if executor.has_open_position(&dedup_key).await.unwrap_or(false) {
                                             println!("⚠️ Already have LIVE Kalshi position on {} — skipping",
                                                 dedup_key);
-                                            executed_tickers.insert(dedup_key.clone());
+                                            executed_tickers.insert(dedup_key.clone(), std::time::Instant::now());
                                         } else {
 
-                                        // ── Fee + EV calculation ────────────────────────────
-                                        let whale_price_cents = (trade.price * 100.0).round() as i64;
-                                        let price_cents = whale_price_cents.clamp(1, 99);
+                                        // ── Fee + EV calculation (using Kalshi live price, not Polymarket) ──
+                                        let kalshi_price = if match_result.side.eq_ignore_ascii_case("yes") {
+                                            snapshot.yes_price_cents
+                                        } else {
+                                            snapshot.no_price_cents
+                                        };
+                                        let price_cents = kalshi_price.clamp(1, 99);
                                         let fee_cents = kalshi_taker_fee_cents(price_cents);
                                         let wr = whale_win_rate.unwrap_or(0.0);
                                         let ev_cents = expected_value_cents(wr, price_cents, fee_cents);
@@ -639,7 +729,10 @@ pub async fn watch_whales(threshold: u64, interval: u64, conn: Connection) -> Re
                                         let bet_size = kelly_dollars
                                             .min(max_bet_cap)
                                             .max(1.0); // $1 floor
-                                        let count = ((bet_size * 100.0) / price_cents as f64).max(1.0) as i32;
+                                        // Cap by TOTAL cost (price + fees), not just price — fees can add $2+ on cheap contracts
+                                        let max_count_by_cap = ((max_bet_cap * 100.0) / (price_cents as f64 + fee_cents as f64)).floor() as i32;
+                                        let count_by_kelly = ((bet_size * 100.0) / price_cents as f64).max(1.0) as i32;
+                                        let count = count_by_kelly.min(max_count_by_cap.max(1));
                                         let trade_cost_cents = (count as i64) * price_cents;
                                         let total_cost_with_fees = trade_cost_cents + (count as i64) * fee_cents;
 
@@ -680,42 +773,74 @@ pub async fn watch_whales(threshold: u64, interval: u64, conn: Connection) -> Re
                                             ).await {
                                                 Ok(order_id) => {
                                                     println!("✅ Order Placed: {}", order_id.to_string().green());
-                                                    executed_tickers.insert(dedup_key.clone());
-                                                    daily_loss_cents += trade_cost_cents;
+                                                    executed_tickers.insert(dedup_key.clone(), std::time::Instant::now());
 
                                                     if let Some(row_id) = alert_id {
-                                                        db::mark_alert_executed(
-                                                            &conn,
-                                                            row_id,
-                                                            &order_id.to_string(),
-                                                            &match_result.ticker,
-                                                            &match_result.side,
-                                                            bet_size,
-                                                            price_cents as f64 / 100.0
-                                                        );
+                                                        let conn_clone = conn.clone();
+                                                        let order_id_s = order_id.to_string();
+                                                        let ticker = match_result.ticker.clone();
+                                                        let side = match_result.side.clone();
+                                                        tokio::task::spawn_blocking(move || {
+                                                            let guard = conn_clone.lock().unwrap();
+                                                            db::mark_alert_executed(
+                                                                &*guard,
+                                                                row_id,
+                                                                &order_id_s,
+                                                                &ticker,
+                                                                &side,
+                                                                bet_size,
+                                                                price_cents as f64 / 100.0,
+                                                            );
+                                                        })
+                                                        .await
+                                                        .ok();
                                                     }
 
-                                                    let balance_after = balance_cents.saturating_sub(total_cost_with_fees);
-                                                    if let Some(ref cfg) = config {
-                                                        let url = cfg.webhook_url.as_ref()
-                                                            .or(cfg.discord_webhook_url.as_ref());
-                                                        if let Some(url) = url {
-                                                            let exec_alert = crate::alerts::webhook::ExecutionAlert {
-                                                                kalshi_ticker: match_result.ticker.clone(),
-                                                                side: match_result.side.clone(),
-                                                                count,
-                                                                price_cents,
-                                                                fee_cents,
-                                                                total_cost_cents: total_cost_with_fees,
-                                                                ev_cents,
-                                                                kelly_pct: kelly_frac * 100.0,
-                                                                whale_win_rate: wr,
-                                                                balance_after_cents: balance_after,
-                                                                poly_title: poly_title.to_string(),
-                                                                order_id: order_id.to_string(),
-                                                            };
-                                                            println!("📨 Sending execution alert...");
-                                                            crate::alerts::webhook::send_execution_alert(url, &exec_alert).await;
+                                                    // Poll for fill (5 attempts, 2s apart) — only count daily loss & send Discord when filled
+                                                    let mut filled = false;
+                                                    for attempt in 1..=5 {
+                                                        tokio::time::sleep(Duration::from_secs(2)).await;
+                                                        if let Ok((status, fill_count)) = executor.get_order_status(&order_id).await {
+                                                            if status == "executed" || fill_count >= count {
+                                                                filled = true;
+                                                                println!("✅ Order {} filled ({} contracts)", order_id, fill_count);
+                                                                break;
+                                                            }
+                                                            if status == "canceled" {
+                                                                println!("⚠️ Order {} was canceled", order_id);
+                                                                break;
+                                                            }
+                                                            if attempt < 5 {
+                                                                println!("   Poll {}/5: status={} fill_count={} — waiting...", attempt, status, fill_count);
+                                                            }
+                                                        }
+                                                    }
+                                                    if !filled {
+                                                        println!("⚠️ Order {} not yet filled after 10s — not counting against daily loss", order_id);
+                                                    } else {
+                                                        daily_loss_cents += trade_cost_cents;
+                                                        let balance_after = balance_cents.saturating_sub(total_cost_with_fees);
+                                                        if let Some(ref cfg) = config {
+                                                            let url = cfg.webhook_url.as_ref()
+                                                                .or(cfg.discord_webhook_url.as_ref());
+                                                            if let Some(url) = url {
+                                                                let exec_alert = crate::alerts::webhook::ExecutionAlert {
+                                                                    kalshi_ticker: match_result.ticker.clone(),
+                                                                    side: match_result.side.clone(),
+                                                                    count,
+                                                                    price_cents,
+                                                                    fee_cents,
+                                                                    total_cost_cents: total_cost_with_fees,
+                                                                    ev_cents,
+                                                                    kelly_pct: kelly_frac * 100.0,
+                                                                    whale_win_rate: wr,
+                                                                    balance_after_cents: balance_after,
+                                                                    poly_title: poly_title.to_string(),
+                                                                    order_id: order_id.to_string(),
+                                                                };
+                                                                println!("📨 Sending execution alert...");
+                                                                crate::alerts::webhook::send_execution_alert(url, &exec_alert).await;
+                                                            }
                                                         }
                                                     }
                                                 },
@@ -728,23 +853,41 @@ pub async fn watch_whales(threshold: u64, interval: u64, conn: Connection) -> Re
                                     } else {
                                         println!("⚠️ Execution skipped (No credentials)");
                                     }
+                                    } else {
+                                        println!("⚠️ Skipping {}: could not fetch Kalshi market data",
+                                            match_result.ticker);
+                                    }
                                 }
                             }
                             // ═══ END EXECUTION PIPELINE ════════════════════════
 
                             // Record to wallet memory DB
                             if let Some(ref wallet_id) = trade.wallet_id {
-                                wallet_tracker.record_to_db(
-                                    &conn,
-                                    wallet_id,
-                                    trade.market_title.as_deref(),
-                                    Some(&trade.asset_id),
-                                    trade.outcome.as_deref(),
-                                    &trade.side,
-                                    trade_value,
-                                    trade.price,
-                                    "Polymarket",
-                                );
+                                let conn_clone = conn.clone();
+                                let wallet_id_s = wallet_id.clone();
+                                let market_title = trade.market_title.clone();
+                                let asset_id = trade.asset_id.clone();
+                                let outcome = trade.outcome.clone();
+                                let side = trade.side.clone();
+                                let trade_value_cp = trade_value;
+                                let price_cp = trade.price;
+                                tokio::task::spawn_blocking(move || {
+                                    let guard = conn_clone.lock().unwrap();
+                                    db::record_wallet_memory(
+                                        &*guard,
+                                        &wallet_id_s,
+                                        market_title.as_deref(),
+                                        Some(&asset_id),
+                                        outcome.as_deref(),
+                                        &side,
+                                        trade_value_cp,
+                                        price_cp,
+                                        "Polymarket",
+                                    );
+                                })
+                                .await
+                                .ok();
+                                wallet_tracker.record_wallet_seen(wallet_id);
                             }
                         }
                     }
@@ -859,7 +1002,13 @@ pub async fn watch_whales(threshold: u64, interval: u64, conn: Connection) -> Re
                                 top_holders: None,
                             };
 
-                            history::log_alert(&alert_data, &conn);
+                            let params = history::build_log_params(&alert_data);
+                            let conn_clone = conn.clone();
+                            tokio::task::spawn_blocking(move || {
+                                history::log_alert_blocking(params, &*conn_clone.lock().unwrap())
+                            })
+                            .await
+                            .ok();
                         }
                     }
 
