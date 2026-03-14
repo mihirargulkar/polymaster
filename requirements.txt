@@ -1,0 +1,11 @@
+python-dotenv==1.0.1
+requests==2.31.0
+pydantic>=2.9.0
+cryptography==42.0.5
+python-dateutil==2.9.0.post0
+feedparser==6.0.11
+# We will use the REST API for Kalshi. 
+# For polymarket, py_clob_client is often used, but we can also use plain requests if we just need discovery.
+# Anthropic for LLM steps later
+groq==0.4.2
+openai==1.14.2

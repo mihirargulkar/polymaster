@@ -1,42 +1,12 @@
-# Rust
-/target/
-**/*.rs.bk
-Cargo.lock
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# Logs
-*.log
-logs/
-
-# Environment & secrets
 .env
-.env.*
-kalshi-key.pem
-
-# Dependencies
-node_modules/
-
-# Python
 .venv/
+venv/
 __pycache__/
-*.pyc
-
-# macOS
+*.py[cod]
+*$py.class
+logs/
+data/*.db
+data/*.db-journal
+data/*.db-shm
+data/*.db-wal
 .DS_Store
-
-# Build artifacts
-*.tgz
-build/
-
-# Browser automation
-.playwright-mcp/
-
-# Runtime data (keep DB but ignore WAL/SHM)
-*.db-shm
-*.db-wal
