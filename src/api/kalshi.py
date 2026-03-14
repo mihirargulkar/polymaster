@@ -13,13 +13,24 @@ class KalshiClient:
         self.base_url = "https://api.elections.kalshi.com/trade-api/v2"
         self.key_id = os.getenv("KALSHI_API_KEY_ID")
         self.key_path = os.getenv("KALSHI_PRIVATE_KEY_PATH", "kalshi-key.pem")
+        self.key_raw = os.getenv("KALSHI_PRIVATE_KEY_RAW")
         
         try:
-            with open(self.key_path, "rb") as key_file:
+            if self.key_raw:
+                # Direct string injection via Cloud Environment Variable (easier than Secret Files)
+                # Replace explicit "\n" strings with actual newlines if configured that way in .env
+                raw_key_bytes = self.key_raw.replace("\\n", "\n").encode('utf-8')
                 self.private_key = serialization.load_pem_private_key(
-                    key_file.read(),
+                    raw_key_bytes,
                     password=None,
                 )
+            else:
+                # Fallback to local file lookup
+                with open(self.key_path, "rb") as key_file:
+                    self.private_key = serialization.load_pem_private_key(
+                        key_file.read(),
+                        password=None,
+                    )
         except Exception as e:
             logger.error(f"Failed to load Kalshi RSA key: {e}")
             self.private_key = None
